@@ -1,0 +1,11 @@
+*.o
+*~
+.*.swp
+
+core*
+
+main
+ldap
+
+cert*
+pkey

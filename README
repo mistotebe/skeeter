@@ -1,0 +1,5 @@
+This is a smallish IMAP reverse proxy based on libevent and OpenLDAP.
+
+When trying to build it you'll need libevent 2.1 installed on your system or
+somewhere else. If libevent is not installed in your system, set the
+LIBEVENT_PATH make variable.
