@@ -7,10 +7,6 @@
 #include <event2/bufferevent.h>
 #include <event2/bufferevent_ssl.h>
 
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#include <openssl/rand.h>
-
 static int imap_capability(struct imap_context *ctx, struct imap_request *req, void *priv);
 static int imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv);
 static int imap_login(struct imap_context *ctx, struct imap_request *req, void *priv);
@@ -53,34 +49,6 @@ imap_handle_request(struct imap_context *ctx, struct imap_request *req)
     return IMAP_OK;
 }
 
-static SSL_CTX *
-evssl_init(void)
-{
-    SSL_CTX  *server_ctx;
-
-    /* Initialize the OpenSSL library */
-    SSL_load_error_strings();
-    SSL_library_init();
-    /* We MUST have entropy, or else there's no point to crypto. */
-    if (!RAND_poll())
-        return NULL;
-
-    server_ctx = SSL_CTX_new(SSLv23_server_method());
-
-    if (! SSL_CTX_use_certificate_chain_file(server_ctx, "cert") ||
-        ! SSL_CTX_use_PrivateKey_file(server_ctx, "pkey", SSL_FILETYPE_PEM)) {
-        puts("Couldn't read 'pkey' or 'cert' file.  To generate a key\n"
-           "and self-signed certificate, run:\n"
-           "  openssl genrsa -out pkey 2048\n"
-           "  openssl req -new -key pkey -out cert.req\n"
-           "  openssl x509 -req -days 365 -in cert.req -signkey pkey -out cert");
-        return NULL;
-    }
-    SSL_CTX_set_options(server_ctx, SSL_OP_NO_SSLv2);
-
-    return server_ctx;
-}
-
 struct imap_driver *
 imap_driver_init(struct event_base *base, char *host, int port)
 {
@@ -103,9 +71,11 @@ imap_driver_init(struct event_base *base, char *host, int port)
         }
     }
 
-    driver->ssl_ctx = evssl_init();
-    if (driver->ssl_ctx == NULL)
+    driver->ssl_ctx = new_server_ctx("cert", "pkey");
+    if (driver->ssl_ctx == NULL) {
+        free(driver);
         return NULL;
+    }
 
     return driver;
 }

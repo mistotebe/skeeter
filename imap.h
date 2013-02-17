@@ -2,10 +2,10 @@
 #define _IMAP_H
 
 #include "avl/avl.h"
+#include "ssl.h"
 #include <lber.h>
 #include <event2/event.h>
 #include <event2/dns.h>
-#include <openssl/ssl.h>
 
 #define IMAP_OK 0
 #define IMAP_TOCONTINUE 1
