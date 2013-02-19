@@ -2,7 +2,7 @@
 
 CC = gcc
 PROGRAM = main ldap
-LDLIBS = -levent -lssl -lldap -llber -levent_openssl
+LDLIBS = -levent -lssl -lldap -llber -levent_openssl -lcrypto
 CPPFLAGS += -I $(LIBEVENT_PATH)/include
 CFLAGS = -g -Wall
 
