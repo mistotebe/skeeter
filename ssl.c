@@ -27,7 +27,7 @@ new_server_ctx(char *cert, char *pkey)
 {
     SSL_CTX  *server_ctx;
 
-    if (!init_ssl())
+    if (init_ssl())
         return NULL;
 
     server_ctx = SSL_CTX_new(SSLv23_server_method());
