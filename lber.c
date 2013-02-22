@@ -61,9 +61,15 @@ static ber_slen_t
 sb_libevent_read(Sockbuf_IO_Desc *sbiod, void *buf, ber_len_t len)
 {
     struct bufferevent *bev = sbiod->sbiod_pvt;
+    ber_slen_t read;
 
     printf( "%s: invoked\n", __func__ );
-    return bufferevent_read(bev, buf, len);
+    read = bufferevent_read(bev, buf, len);
+    /* Were we to return a zero length read without setting errno, liblber
+     * would think the socket is closed and give up on it */
+    if (!read)
+        errno = EWOULDBLOCK;
+    return read;
 }
 
 static ber_slen_t
