@@ -3,16 +3,19 @@
 
 #include <ldap.h>
 #include "config.h"
+#include "module.h"
 
 typedef void (*ldap_cb)(LDAPMessage *, void *);
 
+extern struct module ldap_module;
+
 struct user_info {
     char *username;
-    char *[] attrs;
+    char * attrs[];
 };
 
-int ldap_driver_init(void);
-int ldap_driver_config(config_setting_t *);
+int ldap_driver_init(struct module *, struct event_base *);
+int ldap_driver_config(struct module *module, config_setting_t *);
 
 int get_user_info(struct user_info *, ldap_cb, /* int *, */ void *);
 //void abandon_search(int);
