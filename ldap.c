@@ -18,14 +18,16 @@ struct request {
 };
 
 struct ldap_config {
-    LDAPURLDesc *uri;
+    LDAPURLDesc *data;
     char *bind_dn;
     char *password;
+    char *uri;
 };
 
 static struct ldap_config ldap_config = {
     .bind_dn = "cn=Directory Manager,o=example.com",
     .password = "abcd",
+    .uri = DEFAULT_URI,
 };
 
 struct ldap_driver {
@@ -80,7 +82,7 @@ ldap_driver_connect(struct ldap_driver* driver)
     driver->bev = bufferevent_socket_new(driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(driver->bev, EV_READ|EV_WRITE);
     bufferevent_socket_connect_hostname(driver->bev, dnsbase, AF_UNSPEC,
-                                        conf->uri->lud_host, conf->uri->lud_port);
+                                        conf->data->lud_host, conf->data->lud_port);
 
     bufferevent_setcb(driver->bev, NULL, NULL, ldap_connect_cb, driver);
 }
@@ -92,7 +94,7 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
     Sockbuf *sb;
 
     if (events & BEV_EVENT_CONNECTED) {
-        if (ldap_init_fd(bufferevent_getfd(bev), LDAP_PROTO_EXT, driver->config->uri->lud_host, driver->ld))
+        if (ldap_init_fd(bufferevent_getfd(bev), LDAP_PROTO_EXT, driver->config->uri, driver->ld))
             goto ldap_connect_cleanup;
         ldap_get_option(driver->ld, LDAP_OPT_SOCKBUF, &sb);
         if (sb == NULL) {
@@ -147,18 +149,16 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
 
     // first parse the uri - it should allocate the LDAPURLDesc structure
     setting = config_setting_get_member(conf, "uri");
-    if (setting == NULL)
-        name = DEFAULT_URI;
-    else{
+    if (setting != NULL) {
         name = config_setting_get_string(setting);
-        if (name == NULL)
+        if (name != NULL)
         {
-            name = DEFAULT_URI;
+            asprintf(ldap_config.uri, "%s", name);
         }
     }
 
-    if (ldap_is_ldap_url(name)) {
-        if (ldap_url_parse(name,&(ldap_config.uri))) {
+    if (ldap_is_ldap_url(ldap_config.uri)) {
+        if (ldap_url_parse(name,&(ldap_config.data))) {
             fprintf(stderr, "Can not parse LDAP URI\n");
             return 1;
         }
@@ -175,9 +175,9 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
         {
             config_entry(ldap_config.bind_dn, bind_dn),
             config_entry(ldap_config.password, password),
-            config_entry(ldap_config.uri->lud_dn, search_base),
-            config_entry(ldap_config.uri->lud_filter, filter),
-            config_entry(ldap_config.uri->lud_attrs, attribute)
+            config_entry(ldap_config.data->lud_dn, search_base),
+            config_entry(ldap_config.data->lud_filter, filter),
+            config_entry(ldap_config.data->lud_attrs, attribute)
         };
  
     for (i=0; i < sizeof(simple_entries)/sizeof(*simple_entries); i++) {
@@ -188,11 +188,7 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
         name = config_setting_get_string(setting);
         if (name != NULL) {
             /* lazy, lazy */
-
-            // clear any preceding values
-            if (simple_entries[i].addr != NULL)
-                free(simple_entries[i].addr);
-            asprintf(simple_entries[i].addr,"%s",name);
+           asprintf(simple_entries[i].addr,"%s",name);
         }
     }
 
