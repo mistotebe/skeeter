@@ -6,8 +6,10 @@
 #include <errno.h>
 #include <stdlib.h>
 
-#define config_entry(obj, name) { #name, &((obj).name) }
+#define config_entry(obj, name) { #name, &(obj) }
 #define LDAP_PROTO_EXT 4
+
+#define DEFAULT_URI "ldap://ldap.example.com:389/o=example.com?mailHost?sub?(mail=%u)"
 
 struct request {
     int msgid;
@@ -16,23 +18,14 @@ struct request {
 };
 
 struct ldap_config {
-    char *host;
-    int port;
+    LDAPURLDesc *uri;
     char *bind_dn;
     char *password;
-    char *search_base;
-    char *filter;
-    char *attribute;
 };
 
 static struct ldap_config ldap_config = {
-    .host = "ldap://ldap.example.com",
-    .port = 389,
     .bind_dn = "cn=Directory Manager,o=example.com",
     .password = "abcd",
-    .search_base = "o=example.com",
-    .filter = "(mail=%u)",
-    .attribute = "mailHost"
 };
 
 struct ldap_driver {
@@ -79,6 +72,7 @@ void
 ldap_driver_connect(struct ldap_driver* driver)
 {
     struct evdns_base *dnsbase = get_dnsbase(); // not working yes
+    struct ldap_config *conf = driver->config;
 
     if (driver->bev != NULL)
         bufferevent_free(driver->bev);
@@ -86,7 +80,7 @@ ldap_driver_connect(struct ldap_driver* driver)
     driver->bev = bufferevent_socket_new(driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(driver->bev, EV_READ|EV_WRITE);
     bufferevent_socket_connect_hostname(driver->bev, dnsbase, AF_UNSPEC,
-                                        driver->config->host, driver->config->port);
+                                        conf->uri->lud_host, conf->uri->lud_port);
 
     bufferevent_setcb(driver->bev, NULL, NULL, ldap_connect_cb, driver);
 }
@@ -96,12 +90,9 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
     struct ldap_driver *driver = ctx;
     int rc;
     Sockbuf *sb;
-    char *ldap_uri;
-
-    asprintf(ldap_uri,"%s:%d",driver->config->host,driver->config->port);
 
     if (events & BEV_EVENT_CONNECTED) {
-        if (ldap_init_fd(bufferevent_getfd(bev), LDAP_PROTO_EXT, ldap_uri, driver->ld))
+        if (ldap_init_fd(bufferevent_getfd(bev), LDAP_PROTO_EXT, driver->config->uri->lud_host, driver->ld))
             goto ldap_connect_cleanup;
         ldap_get_option(driver->ld, LDAP_OPT_SOCKBUF, &sb);
         if (sb == NULL) {
@@ -119,7 +110,6 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
         }
 
         bufferevent_setcb(bev, ldap_read_cb, NULL, ldap_error_cb, driver);
-        free(ldap_uri);
         return;
     }
 
@@ -147,13 +137,35 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
 {
     /* update the config with the appropriate values and register as "ldap" so
      * that "imap" can retrieve the driver */
-    config_setting_t *setting, *value;
+    config_setting_t *setting;
     struct ldap_driver *driver;
     const char *name;
-    int port, i;
+    int i;
 
     if (conf == NULL)
         return 1;
+
+    // first parse the uri - it should allocate the LDAPURLDesc structure
+    setting = config_setting_get_member(conf, "uri");
+    if (setting == NULL)
+        name = DEFAULT_URI;
+    else{
+        name = config_setting_get_string(setting);
+        if (name == NULL)
+        {
+            name = DEFAULT_URI;
+        }
+    }
+
+    if (ldap_is_ldap_url(name)) {
+        if (ldap_url_parse(name,&(ldap_config.uri))) {
+            fprintf(stderr, "Can not parse LDAP URI\n");
+            return 1;
+        }
+    } else {
+        fprintf(stderr, "Wrong format of ldap URI\n");
+        return 1;
+    }
 
     // entries that should contain only one string
     struct {
@@ -161,31 +173,13 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
         char **addr;
     } simple_entries[] =
         {
-            config_entry(ldap_config, bind_dn),
-            config_entry(ldap_config, password),
-            config_entry(ldap_config, search_base),
-            config_entry(ldap_config, filter),
-            config_entry(ldap_config, attribute)
+            config_entry(ldap_config.bind_dn, bind_dn),
+            config_entry(ldap_config.password, password),
+            config_entry(ldap_config.uri->lud_dn, search_base),
+            config_entry(ldap_config.uri->lud_filter, filter),
+            config_entry(ldap_config.uri->lud_attrs, attribute)
         };
  
-    setting = config_setting_get_member(conf, "host");
-    if (setting != NULL) {
-        value = config_setting_get_elem(setting, 0);
-        name = config_setting_get_string(value);
-        if (name != NULL) {
-            /* lazy, lazy */
-            asprintf(&ldap_config.host, "%s", name);
-        }
-
-        value = config_setting_get_elem(setting, 1);
-        port = config_setting_get_int(value);
-        if ((port > 0) && (port <= 65535)) {
-            ldap_config.port = port;
-        } else {
-            return 1;
-        }
-    }
-
     for (i=0; i < sizeof(simple_entries)/sizeof(*simple_entries); i++) {
         setting = config_setting_get_member(conf, simple_entries[i].name);
         if (setting == NULL)
@@ -194,6 +188,10 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
         name = config_setting_get_string(setting);
         if (name != NULL) {
             /* lazy, lazy */
+
+            // clear any preceding values
+            if (simple_entries[i].addr != NULL)
+                free(simple_entries[i].addr);
             asprintf(simple_entries[i].addr,"%s",name);
         }
     }
