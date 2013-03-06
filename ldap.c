@@ -9,7 +9,7 @@
 #define config_entry(obj, name) { #name, &(obj) }
 #define LDAP_PROTO_EXT 4
 
-#define DEFAULT_URI "ldap://ldap.example.com:389/o=example.com?mailHost?sub?(mail=%u)"
+#define DEFAULT_URI "ldap://ldap.example.com:389/o=example.com?mailHost?sub?(mail=%s)"
 
 struct request {
     int msgid;
@@ -68,23 +68,47 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx) {
      * corrensponding pending request */
 }
 
+void ldap_bind_cb(struct bufferevent *bev, void *ctx) {
+    /* try ldap_result and iterate over the results */
+    struct ldap_driver *driver = ctx;
+    LDAPMessage *res;
+    int msgtype, errcode;
+    static struct timeval poll_time = {0, 0};
+
+    while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &poll_time, &res )) > 0 ) {
+        if ( msgtype == LDAP_RES_BIND ) {
+            if ( LDAP_SUCCESS == ldap_parse_result(driver->ld, res, &errcode, NULL, NULL, NULL, NULL, 1) ) {
+                if ( errcode == LDAP_SUCCESS ) {
+                    bufferevent_setcb(bev, ldap_read_cb, NULL, ldap_error_cb, ctx);
+                    return;
+                } else {
+                    fprintf(stderr, "Bind failed: %s\n", ldap_err2string(errcode));
+                    // let it looping until timeout
+                    continue;
+                }
+            }
+        } // ignore other than bind_result responses
+    } //otherwise restart bind
+}
+
 // bufferevent creation and callback setting might be used more times
 // therefore it deserves own function
-void
-ldap_driver_connect(struct ldap_driver* driver)
-{
+void ldap_driver_connect(struct bufferevent *bev, short events, void *ctx)
+
     struct evdns_base *dnsbase = get_dnsbase(); // not working yes
+    struct ldap_driver *driver = ctx;
     struct ldap_config *conf = driver->config;
 
-    if (driver->bev != NULL)
-        bufferevent_free(driver->bev);
+    if (bev != NULL)
+        bufferevent_free(bev);
 
     driver->bev = bufferevent_socket_new(driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
-    bufferevent_enable(driver->bev, EV_READ|EV_WRITE);
-    bufferevent_socket_connect_hostname(driver->bev, dnsbase, AF_UNSPEC,
+    bufferevent_enable(bev, EV_READ|EV_WRITE);
+    bufferevent_socket_connect_hostname(bev, dnsbase, AF_UNSPEC,
                                         conf->data->lud_host, conf->data->lud_port);
+    driver->bev = bev;
 
-    bufferevent_setcb(driver->bev, NULL, NULL, ldap_connect_cb, driver);
+    bufferevent_setcb(bev, NULL, NULL, ldap_connect_cb, driver);
 }
 
 void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
@@ -106,12 +130,12 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
             goto ldap_connect_cleanup;
         }
         errno = 0;
-        rc = ldap_simple_bind_s(driver->ld, driver->config->bind_dn, driver->config->password);
+        rc = ldap_simple_bind(driver->ld, driver->config->bind_dn, driver->config->password);
         if (rc != LDAP_SUCCESS) {
             fprintf(stderr, "error during bind: %s\n", ldap_err2string(rc));
         }
 
-        bufferevent_setcb(bev, ldap_read_cb, NULL, ldap_error_cb, driver);
+        bufferevent_setcb(bev, ldap_bind_cb, NULL, ldap_error_cb, driver);
         return;
     }
 
@@ -120,7 +144,7 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
         bufferevent_free(bev);
         // wait for some time and try reconnect
         // sleep(5);
-        ldap_driver_connect(driver);
+        ldap_driver_connect(bev, 0, driver);
 }
 
 int ldap_driver_init(struct module *module, struct event_base *base)
@@ -130,7 +154,7 @@ int ldap_driver_init(struct module *module, struct event_base *base)
     struct ldap_driver *driver = module->priv;
     driver->base = base;
 
-    ldap_driver_connect(driver);
+    ldap_driver_connect(NULL, 0, driver);
 
     return 0;
 }
@@ -151,8 +175,7 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
     setting = config_setting_get_member(conf, "uri");
     if (setting != NULL) {
         name = config_setting_get_string(setting);
-        if (name != NULL)
-        {
+        if (name != NULL) {
             asprintf(ldap_config.uri, "%s", name);
         }
     }
