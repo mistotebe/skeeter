@@ -156,7 +156,7 @@ int ldap_driver_init(struct module *module, struct event_base *base)
     driver->base = base;
     // no waiting on init
     struct timeval initial_timeout = { 0, 0 };
-    
+
     driver->reconnect_event = event_new(base, -1, EV_TIMEOUT, ldap_driver_connect_cb,
                                 (char *) "LDAP handling event");
     if (driver->reconnect_event == NULL) {
@@ -212,7 +212,7 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
             config_entry(ldap_config.data->lud_filter, filter),
             config_entry(ldap_config.data->lud_attrs, attribute)
         };
- 
+
     for (i=0; i < sizeof(simple_entries)/sizeof(*simple_entries); i++) {
         setting = config_setting_get_member(conf, simple_entries[i].name);
         if (setting == NULL)
@@ -237,6 +237,103 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
     module->priv = driver;
 
     return 0;
+}
+
+char * expand_tokens(char *pattern, char *username, char *domain)
+{
+ /*
+  * Expand user specified search string into usable ldap filter
+  * %% = %
+  * %u = username
+  * %U = username@domain
+  * %d = domain
+  * TODO: escape some characters "* ( ) \ \0"
+  */
+    char *buffer, *buf_ptr, *orig, *orig_end, *token;
+    int username_len, domain_len, total;
+
+    total = strlen(pattern);
+    username_len = strlen(username);
+    domain_len = strlen(domain);
+
+    orig = pattern;
+    orig_end = pattern + total;
+
+    for(; *orig; orig++) {
+        if( *orig == '%' ) {
+            switch(*(orig+1)) {
+                // two '%' reduces into one
+                case '%':
+                    total--;
+                    break;
+                case 'u':
+                    total += username_len - 2;
+                    break;
+                case 'U':
+                    // full address should contain additionaly an '@'
+                    total += username_len + domain_len - 1;
+                    break;
+                case 'd':
+                    total += domain_len - 2;
+                    break;
+                default:
+                    fprintf(stderr,"Unsupported token\n");
+                    break;
+            }
+        }
+    }
+
+    buffer = malloc( (total + 1) * sizeof(char));
+    if (buffer == NULL) {
+        fprintf(stderr, "not enough memory\n");
+        goto expand_tokens_cleanup;
+    }
+    memset(buffer,'\0', total+1);
+    buf_ptr = buffer;
+    orig = pattern;
+
+    while ( (token=strchr(orig,'%')) != NULL ) {
+        if (token > orig) {
+            memcpy(buf_ptr, orig, token-orig);
+            buf_ptr += token-orig;
+        }
+
+        if (token+1 > orig_end) {
+            fprintf(stderr,"Boundary broken\n");
+            goto expand_tokens_cleanup;
+        }
+
+        switch( *(token+1) ){
+            case '%':
+                *buf_ptr = *token;
+                break;
+            case 'u':
+                memcpy(buf_ptr, username, username_len); buf_ptr += username_len;
+                break;
+            case 'U':
+                memcpy(buf_ptr, username, username_len); buf_ptr += username_len;
+                *buf_ptr++ = '@';
+                memcpy(buf_ptr, domain, domain_len); buf_ptr += domain_len;
+                break;
+            case 'd':
+                memcpy(buf_ptr, domain, domain_len); buf_ptr += domain_len;
+                break;
+            default:
+                fprintf(stderr,"Malformed filter\n");
+                goto expand_tokens_cleanup;
+        }
+
+        orig = token + 2;
+    }
+
+    if (orig < orig_end)
+        memcpy(buf_ptr,orig,orig_end-orig);
+
+    return buffer;
+
+    expand_tokens_cleanup:
+        free(buffer);
+        return NULL;
 }
 
 int get_user_info(struct user_info *info, ldap_cb cb, void *ctx)
