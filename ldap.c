@@ -22,12 +22,14 @@ struct ldap_config {
     char *bind_dn;
     char *password;
     char *uri;
+    struct timeval reconnect_tout;
 };
 
 static struct ldap_config ldap_config = {
     .bind_dn = "cn=Directory Manager,o=example.com",
     .password = "abcd",
     .uri = DEFAULT_URI,
+    .reconnect_tout = { 5, 0 },
 };
 
 struct ldap_driver {
@@ -35,6 +37,7 @@ struct ldap_driver {
     struct bufferevent *bev;
     LDAP *ld;
     struct ldap_config *config;
+    struct event *reconnect_event;
 
     Avlnode *pending_requests;
 };
@@ -83,32 +86,13 @@ void ldap_bind_cb(struct bufferevent *bev, void *ctx) {
                     return;
                 } else {
                     fprintf(stderr, "Bind failed: %s\n", ldap_err2string(errcode));
-                    // let it looping until timeout
-                    continue;
+                    // try binding again after some time
+                    event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
+                    return;
                 }
             }
         } // ignore other than bind_result responses
     } //otherwise restart bind
-}
-
-// bufferevent creation and callback setting might be used more times
-// therefore it deserves own function
-void ldap_driver_connect(struct bufferevent *bev, short events, void *ctx)
-
-    struct evdns_base *dnsbase = get_dnsbase(); // not working yes
-    struct ldap_driver *driver = ctx;
-    struct ldap_config *conf = driver->config;
-
-    if (bev != NULL)
-        bufferevent_free(bev);
-
-    driver->bev = bufferevent_socket_new(driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
-    bufferevent_enable(bev, EV_READ|EV_WRITE);
-    bufferevent_socket_connect_hostname(bev, dnsbase, AF_UNSPEC,
-                                        conf->data->lud_host, conf->data->lud_port);
-    driver->bev = bev;
-
-    bufferevent_setcb(bev, NULL, NULL, ldap_connect_cb, driver);
 }
 
 void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
@@ -143,8 +127,25 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
     ldap_connect_cleanup:
         bufferevent_free(bev);
         // wait for some time and try reconnect
-        // sleep(5);
-        ldap_driver_connect(bev, 0, driver);
+        event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
+}
+
+// bufferevent creation and callback setting might be used more times
+// therefore it deserves own function
+void ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
+{
+    struct evdns_base *dnsbase = get_dnsbase(); // not working yes
+    struct ldap_driver *driver = ctx;
+    struct ldap_config *conf = driver->config;
+
+    if (driver->bev != NULL)
+        bufferevent_free(driver->bev);
+
+    driver->bev = bufferevent_socket_new(driver->base, fd, BEV_OPT_CLOSE_ON_FREE);
+    bufferevent_enable(driver->bev, EV_READ|EV_WRITE);
+    bufferevent_socket_connect_hostname(driver->bev, dnsbase, AF_UNSPEC,
+                                        conf->data->lud_host, conf->data->lud_port);
+    bufferevent_setcb(driver->bev, NULL, NULL, ldap_connect_cb, driver);
 }
 
 int ldap_driver_init(struct module *module, struct event_base *base)
@@ -153,8 +154,17 @@ int ldap_driver_init(struct module *module, struct event_base *base)
      * store the ld to driver */
     struct ldap_driver *driver = module->priv;
     driver->base = base;
+    // no waiting on init
+    struct timeval initial_timeout = { 0, 0 };
+    
+    driver->reconnect_event = event_new(base, -1, EV_TIMEOUT, ldap_driver_connect_cb,
+                                (char *) "LDAP handling event");
+    if (driver->reconnect_event == NULL) {
+        fprintf(stderr, "Failed to create LDAP handling event\n");
+        return 1;
+    }
 
-    ldap_driver_connect(NULL, 0, driver);
+    event_add(driver->reconnect_event, &initial_timeout);
 
     return 0;
 }
@@ -166,7 +176,7 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
     config_setting_t *setting;
     struct ldap_driver *driver;
     const char *name;
-    int i;
+    int i,tout;
 
     if (conf == NULL)
         return 1;
@@ -209,9 +219,17 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
             continue;
 
         name = config_setting_get_string(setting);
-        if (name != NULL) {
+        if ( name != NULL ) {
             /* lazy, lazy */
            asprintf(simple_entries[i].addr,"%s",name);
+        }
+    }
+
+    setting = config_setting_get_member(conf, "reconnect_timeout");
+    if (setting != NULL) {
+        tout = config_setting_get_int(setting);
+        if (tout >= 0) {
+            ldap_config.reconnect_tout.tv_sec = tout;
         }
     }
 
