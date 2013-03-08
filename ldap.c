@@ -9,7 +9,7 @@
 #define config_entry(obj, name) { #name, &(obj) }
 #define LDAP_PROTO_EXT 4
 
-#define DEFAULT_URI "ldap://ldap.example.com:389/o=example.com?mailHost?sub?(mail=%s)"
+#define DEFAULT_URI "ldap://ldap.example.com:389/o=example.com?mailHost?sub?(uid=%u)"
 
 struct request {
     int msgid;
@@ -191,7 +191,7 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
     }
 
     if (ldap_is_ldap_url(ldap_config.uri)) {
-        if (ldap_url_parse(name,&(ldap_config.data))) {
+        if (ldap_url_parse(ldap_config.uri,&(ldap_config.data))) {
             fprintf(stderr, "Can not parse LDAP URI\n");
             return 1;
         }
@@ -212,6 +212,7 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
             config_entry(ldap_config.data->lud_filter, filter),
             config_entry(ldap_config.data->lud_attrs, attribute)
         };
+    // TODO: attributes must be in null terminated list of strings, should be handled independently from other entries
 
     for (i=0; i < sizeof(simple_entries)/sizeof(*simple_entries); i++) {
         setting = config_setting_get_member(conf, simple_entries[i].name);
