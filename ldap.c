@@ -57,6 +57,20 @@ static int request_cmp(void *left, void *right)
 
 void ldap_connect_cb(struct bufferevent *, short, void *);
 
+int get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
+{
+/*
+ * Simple getter of ldap error code to avoid using original function with
+ * many unused arguments
+ */
+    int result;
+    if ( ldap_parse_result(ld, msg, &result, NULL, NULL, NULL, NULL, 1) != LDAP_SUCCESS ) {
+        fprintf(stderr, "Unable to parse ldap result\n");
+        return -1;
+    }
+    return result;
+}
+
 void ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
 {
     /* have we lost the connection? Disable the module temporarily and try to
@@ -69,6 +83,27 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx) {
     /* for each entry, update the pending_requests */
     /* if search res done is received, invoke the callback and remove the
      * corrensponding pending request */
+
+    struct ldap_driver *driver = ctx;
+    LDAPMessage *res;
+    int msgtype, errcode;
+    static struct timeval poll_time = {0, 0};
+
+    char *attribute_values[] = {{NULL}};
+
+    while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &poll_time, &res )) > 0 ) {
+        errcode = get_ldap_errcode(driver->ld, res);
+        if (errcode != LDAP_SUCCESS) {
+            fprintf(stderr, "Error during reading results: %s\n", ldap_err2string(errcode));
+            //TODO: restart connection to ldap or continue?
+        } else {
+            if ( msgtype == LDAP_RES_SEARCH_ENTRY ) {
+                // read the result and store it into avl
+            } else if ( msgtype == LDAP_RES_SEARCH_RESULT ) {
+                // search is done, process the request
+            }
+        }
+    }
 }
 
 void ldap_bind_cb(struct bufferevent *bev, void *ctx) {
@@ -80,16 +115,15 @@ void ldap_bind_cb(struct bufferevent *bev, void *ctx) {
 
     while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &poll_time, &res )) > 0 ) {
         if ( msgtype == LDAP_RES_BIND ) {
-            if ( LDAP_SUCCESS == ldap_parse_result(driver->ld, res, &errcode, NULL, NULL, NULL, NULL, 1) ) {
-                if ( errcode == LDAP_SUCCESS ) {
-                    bufferevent_setcb(bev, ldap_read_cb, NULL, ldap_error_cb, ctx);
-                    return;
-                } else {
-                    fprintf(stderr, "Bind failed: %s\n", ldap_err2string(errcode));
-                    // try binding again after some time
-                    event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
-                    return;
-                }
+            errcode = get_ldap_errcode(driver->ld, res);
+            if ( errcode == LDAP_SUCCESS ) {
+                bufferevent_setcb(bev, ldap_read_cb, NULL, ldap_error_cb, ctx);
+                return;
+            } else {
+                fprintf(stderr, "Bind failed: %s\n", ldap_err2string(errcode));
+                // try binding again after some time
+                event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
+                return;
             }
         } // ignore other than bind_result responses
     } //otherwise restart bind
