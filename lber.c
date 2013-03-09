@@ -8,7 +8,7 @@
 
 #include <unistd.h>
 
-static int 
+static int
 sb_libevent_setup(Sockbuf_IO_Desc *sbiod, void *arg)
 {
     printf( "%s: invoked\n", __func__ );
@@ -105,12 +105,12 @@ sb_libevent_close(Sockbuf_IO_Desc *sbiod)
 }
 
 Sockbuf_IO ber_sockbuf_io_libevent = {
-	sb_libevent_setup,	/* sbi_setup */
-	sb_libevent_remove,			/* sbi_remove */
-	sb_libevent_ctrl,		/* sbi_ctrl */
-	sb_libevent_read,		/* sbi_read */
-	sb_libevent_write,		/* sbi_write */
-	sb_libevent_close		/* sbi_close */
+    sb_libevent_setup,  /* sbi_setup */
+    sb_libevent_remove, /* sbi_remove */
+    sb_libevent_ctrl,   /* sbi_ctrl */
+    sb_libevent_read,   /* sbi_read */
+    sb_libevent_write,  /* sbi_write */
+    sb_libevent_close   /* sbi_close */
 };
 
 int

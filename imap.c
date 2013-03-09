@@ -37,7 +37,7 @@ imap_handle_request(struct imap_context *ctx, struct imap_request *req)
     struct imap_handler *handler = avl_find(ctx->driver->commands, &h, imap_handler_cmp);
 
     if (handler == NULL) {
-        printf( "No handler defined for command '%s'\n", req->command.bv_val );
+        printf("No handler defined for command '%s'\n", req->command.bv_val);
         evbuffer_add_printf(output, "%s BAD Command %s unrecognized" CRLF, req->tag.bv_val, req->command.bv_val);
         return IMAP_OK;
     }
@@ -101,7 +101,7 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
     void *orig_ctx;
 
     /* retrieve the callbacks to apply them again on the filtering bev */
-    bufferevent_getcb( bev, &readcb, &writecb, &eventcb, &orig_ctx );
+    bufferevent_getcb(bev, &readcb, &writecb, &eventcb, &orig_ctx);
 
     evbuffer_add_printf(output, "%s OK Begin TLS negotiation now" CRLF, req->tag.bv_val);
 
@@ -114,7 +114,7 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
         return IMAP_SHUTDOWN;
     }
 
-    bufferevent_setcb(bev, readcb, writecb, eventcb, orig_ctx );
+    bufferevent_setcb(bev, readcb, writecb, eventcb, orig_ctx);
     bufferevent_enable(bev, EV_WRITE);
     bufferevent_enable(bev, EV_READ);
     ctx->client_bev = bev;
@@ -151,7 +151,7 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
         printf("Got an error on the connection: %s\n",
                 strerror(errno));
     } else if (events & BEV_EVENT_TIMEOUT) {
-        printf("Got a timeout on %s, closing connection.\n", (events & BEV_EVENT_READING) ? "reading" : "writing" );
+        printf("Got a timeout on %s, closing connection.\n", (events & BEV_EVENT_READING) ? "reading" : "writing");
     } else if (events & BEV_EVENT_CONNECTED) {
         printf("Looks like we are connected, proxying...\n");
         bufferevent_setcb(ctx->server_bev, proxy_cb, NULL, server_connect_cb, ctx);
@@ -178,7 +178,7 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
         // use a default domain
         p = ctx->driver->remote_host;
     }
-    
+
     end = strchrnul(p, ' ');
     len = end - p;
 

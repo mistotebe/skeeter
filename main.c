@@ -116,10 +116,10 @@ int main(int argc, char** argv)
 
     signal_event = event_new(base, SIGINT, EV_SIGNAL, signal_cb, base);
 
-	if (!signal_event || event_add(signal_event, NULL)<0) {
-		fprintf(stderr, "Could not create/add a signal event!\n");
-		return 1;
-	}
+    if (!signal_event || event_add(signal_event, NULL) < 0) {
+        fprintf(stderr, "Could not create/add a signal event!\n");
+        return 1;
+    }
 
     /* run */
     event_base_dispatch(base);
@@ -149,7 +149,7 @@ listen_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *
     printf("A connection\n");
     imap_driver_install(bev, driver);
 
-	//bufferevent_write(bev, MESSAGE, strlen(MESSAGE));
+    //bufferevent_write(bev, MESSAGE, strlen(MESSAGE));
     
     if (getnameinfo(sa, socklen, buf, BUFSIZ, NULL, 0, 0) == 0) {
         bufferevent_write(bev, buf, strlen(buf));
@@ -162,15 +162,15 @@ listen_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *
 static void
 conn_readcb(struct bufferevent *bev, void *user_data)
 {
-	struct evbuffer *input = bufferevent_get_input(bev);
-//	struct evbuffer *output = bufferevent_get_output(bev);
+    struct evbuffer *input = bufferevent_get_input(bev);
+//  struct evbuffer *output = bufferevent_get_output(bev);
     struct imap_context *driver_ctx = user_data;
     char *line;
     size_t bytes_read;
     int rc = IMAP_OK;
 
     printf("Ready to read\n");
-	while (rc == IMAP_OK && (line = evbuffer_readln(input, &bytes_read, EVBUFFER_EOL_CRLF))) {
+    while (rc == IMAP_OK && (line = evbuffer_readln(input, &bytes_read, EVBUFFER_EOL_CRLF))) {
         struct imap_request *req = calloc(1, sizeof(struct imap_request));
         char *p, *end;
         ssize_t len;
@@ -201,7 +201,7 @@ conn_readcb(struct bufferevent *bev, void *user_data)
         memcpy(req->command.bv_val, p, len);
         req->command.bv_val[len] = '\0';
 
-        if ( *end == ' ' ) {
+        if (*end == ' ') {
             p = end + 1;
 
             // luckily the potentially longest part of the line needs no copying
@@ -222,38 +222,38 @@ cleanup:
         free(req->command.bv_val);
         free(req->tag.bv_val);
         free(line);
-	}
+    }
 }
 
 static void
 conn_eventcb(struct bufferevent *bev, short events, void *user_data)
 {
-	if (events & BEV_EVENT_EOF) {
-		printf("Connection closed.\n");
-	} else if (events & BEV_EVENT_ERROR) {
-		printf("Got an error on the connection: %s\n",
-		    strerror(errno));
-        printf("OpenSSL error %lu\n", bufferevent_get_openssl_error(bev) );
-	} else if (events & BEV_EVENT_TIMEOUT) {
-		printf("Got a timeout on %s, closing connection.\n", (events & BEV_EVENT_READING) ? "reading" : "writing" );
+    if (events & BEV_EVENT_EOF) {
+        printf("Connection closed.\n");
+    } else if (events & BEV_EVENT_ERROR) {
+        printf("Got an error on the connection: %s\n",
+                strerror(errno));
+        printf("OpenSSL error %lu\n", bufferevent_get_openssl_error(bev));
+    } else if (events & BEV_EVENT_TIMEOUT) {
+        printf("Got a timeout on %s, closing connection.\n", (events & BEV_EVENT_READING) ? "reading" : "writing");
     } else if (events & BEV_EVENT_CONNECTED) {
         printf("Looks like ssl handshake completed.\n");
-        printf("OpenSSL error %lu\n", bufferevent_get_openssl_error(bev) );
+        printf("OpenSSL error %lu\n", bufferevent_get_openssl_error(bev));
         return;
-	}
+    }
     printf("Freeing connection\n");
-	bufferevent_free(bev);
+    bufferevent_free(bev);
 }
 
 static void
 signal_cb(evutil_socket_t sig, short events, void *user_data)
 {
-	struct event_base *base = user_data;
-	struct timeval delay = { 2, 0 };
+    struct event_base *base = user_data;
+    struct timeval delay = { 2, 0 };
 
-	printf("Caught an interrupt signal; exiting cleanly in two seconds.\n");
+    printf("Caught an interrupt signal; exiting cleanly in two seconds.\n");
 
-	event_base_loopexit(base, &delay);
+    event_base_loopexit(base, &delay);
 }
 
 static int imap_driver_install(struct bufferevent *bev, struct imap_driver *driver)
