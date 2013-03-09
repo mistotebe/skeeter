@@ -6,9 +6,11 @@
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
 #include <event2/bufferevent_ssl.h>
+#include <event2/listener.h>
 
 static int imap_driver_install(struct bufferevent *, struct imap_driver *);
 
+static void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
 static void conn_readcb(struct bufferevent *, void *);
 static void conn_eventcb(struct bufferevent *, short, void *);
 
@@ -40,10 +42,17 @@ imap_handler_cmp(const void *left, const void *right)
 }
 
 struct imap_driver *
-imap_driver_init(struct event_base *base, char *host, int port)
+imap_driver_init(struct event_base *base, char *host, int port, int lport)
 {
     struct imap_driver *driver;
     struct imap_handler *handler;
+    struct sockaddr_in6 sin;
+    int socklen = sizeof(sin);
+
+    memset(&sin, 0, socklen);
+    sin.sin6_family = AF_INET6;
+    sin.sin6_addr = in6addr_any;
+    sin.sin6_port = htons(lport);
 
     driver = calloc(1, sizeof(struct imap_driver));
     if (driver == NULL) {
@@ -67,10 +76,24 @@ imap_driver_init(struct event_base *base, char *host, int port)
         return NULL;
     }
 
+    /* after startup dependency notifications are available, create it in
+     * disabled state setting LEV_OPT_DISABLED and enable after ldap tells us
+     * it's ready */
+    driver->listener = evconnlistener_new_bind(base, listen_cb, (void*)driver,
+            LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE, -1, (struct sockaddr *)&sin, socklen);
+    /* could also be wise to set an error callback, but what errors do we face
+     * on accept()? */
+
+    if (!driver->listener) {
+        fprintf(stderr, "Could not create a listener!\n");
+        free(driver);
+        return NULL;
+    }
+
     return driver;
 }
 
-void
+static void
 listen_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *sa, int socklen, void *user_data)
 {
     struct imap_driver *driver = user_data;

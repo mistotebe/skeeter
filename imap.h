@@ -31,6 +31,7 @@ typedef enum {
 struct imap_driver {
     struct event_base *base;
     struct evdns_base *dnsbase;
+    struct evconnlistener *listener;
 
     char *remote_host;
     int remote_port;
@@ -61,9 +62,7 @@ struct imap_request {
 
 int imap_handler_cmp(const void *, const void *);
 
-struct imap_driver *imap_driver_init(struct event_base *, char *, int);
+struct imap_driver *imap_driver_init(struct event_base *, char *, int, int);
 int imap_handle_request(struct imap_context *, struct imap_request *);
-
-void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
 
 #endif /* _IMAP_H */
