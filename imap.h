@@ -6,6 +6,7 @@
 #include <lber.h>
 #include <event2/event.h>
 #include <event2/dns.h>
+#include <event2/listener.h>
 
 #define IMAP_OK 0
 #define IMAP_TOCONTINUE 1
@@ -62,5 +63,7 @@ int imap_handler_cmp(const void *, const void *);
 
 struct imap_driver *imap_driver_init(struct event_base *, char *, int);
 int imap_handle_request(struct imap_context *, struct imap_request *);
+
+void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
 
 #endif /* _IMAP_H */
