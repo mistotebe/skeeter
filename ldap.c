@@ -87,22 +87,6 @@ int main() {
     event_base_dispatch(base);
     event_base_free(base);
 
-    /*
-    do {
-        //msgtype = ldap_result( ld, LDAP_RES_ANY, 0, &poll_time, &res );
-        msgtype = ldap_result( ld, LDAP_RES_ANY, 0, NULL, &res );
-        if ( msgtype < 0 ) {
-            printf( "error obtaining result\n" );
-            return 1;
-        }
-
-        msgtype = ldap_msgtype(res);
-        printf( "read a message of type 0x%x, msgid %d\n", msgtype, ldap_msgid(res) );
-
-        ldap_msgfree( res );
-    } while ( msgtype == LDAP_RES_SEARCH_ENTRY );
-    */
-    
     return 0;
 }
 

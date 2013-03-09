@@ -23,13 +23,10 @@
 #include <lber.h>
 #include "imap.h"
 
-#define MESSAGE "Hello "
-
 #define DEFAULT_SERVER "localhost"
 #define DEFAULT_PORT 1143
 
 static void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
-//static void conn_writecb(struct bufferevent *, void *);
 static void conn_readcb(struct bufferevent *, void *);
 static void conn_eventcb(struct bufferevent *, short, void *);
 static void signal_cb(evutil_socket_t, short, void *);
@@ -138,7 +135,7 @@ listen_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *
     struct imap_driver *driver = user_data;
     struct event_base *base = driver->base;
     struct bufferevent* bev;
-    char buf[BUFSIZ];
+
     bev = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE);
     if (!bev) {
         fprintf(stderr, "Could not acquire bufferevent!\n");
@@ -148,22 +145,12 @@ listen_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *
 
     printf("A connection\n");
     imap_driver_install(bev, driver);
-
-    //bufferevent_write(bev, MESSAGE, strlen(MESSAGE));
-    
-    if (getnameinfo(sa, socklen, buf, BUFSIZ, NULL, 0, 0) == 0) {
-        bufferevent_write(bev, buf, strlen(buf));
-    } else {
-        bufferevent_write(bev, "unknown", strlen("unknown"));
-    }
-    bufferevent_write(bev, "\n", 1);
 }
 
 static void
 conn_readcb(struct bufferevent *bev, void *user_data)
 {
     struct evbuffer *input = bufferevent_get_input(bev);
-//  struct evbuffer *output = bufferevent_get_output(bev);
     struct imap_context *driver_ctx = user_data;
     char *line;
     size_t bytes_read;
