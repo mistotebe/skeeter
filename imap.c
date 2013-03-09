@@ -71,7 +71,7 @@ imap_driver_init(struct event_base *base, char *host, int port)
         }
     }
 
-    driver->ssl_ctx = new_server_ctx("cert", "pkey");
+    driver->ssl_ctx = new_ssl_ctx("cert", "pkey");
     if (driver->ssl_ctx == NULL) {
         free(driver);
         return NULL;

@@ -5,6 +5,6 @@
 #include <openssl/err.h>
 
 int init_ssl(void);
-SSL_CTX *new_server_ctx(char *cert, char *pkey);
+SSL_CTX *new_ssl_ctx(char *cert, char *pkey);
 
 #endif /* _SKEETER_SSL_H */
