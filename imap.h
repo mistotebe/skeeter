@@ -3,6 +3,7 @@
 
 #include "avl/avl.h"
 #include "ssl.h"
+#include "module.h"
 #include <lber.h>
 #include <event2/event.h>
 #include <event2/dns.h>
@@ -21,6 +22,8 @@ struct imap_driver;
 struct imap_config;
 struct imap_context;
 struct imap_request;
+
+extern struct module imap_module;
 
 typedef int (*imap_request_handler)(struct imap_context *, struct imap_request *, void *);
 
@@ -70,8 +73,8 @@ struct imap_request {
 
 int imap_handler_cmp(const void *, const void *);
 
-int imap_driver_config(config_setting_t *);
-struct imap_driver *imap_driver_init(struct event_base *);
+int imap_driver_config(struct module *, config_setting_t *);
+int imap_driver_init(struct module *, struct event_base *);
 int imap_handle_request(struct imap_context *, struct imap_request *);
 
 #endif /* _IMAP_H */

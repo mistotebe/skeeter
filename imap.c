@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "imap.h"
 #include "config.h"
+#include "module.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
@@ -40,6 +41,12 @@ static struct imap_config imap_config = {
     .default_port = 143
 };
 
+struct module imap_module = {
+    .name = "imap",
+    .conf = imap_driver_config,
+    .init = imap_driver_init,
+};
+
 int
 imap_handler_cmp(const void *left, const void *right)
 {
@@ -49,7 +56,7 @@ imap_handler_cmp(const void *left, const void *right)
 }
 
 int
-imap_driver_config(config_setting_t *conf)
+imap_driver_config(struct module *module, config_setting_t *conf)
 {
     config_setting_t *setting, *value;
     struct imap_driver *driver;
@@ -106,41 +113,45 @@ imap_driver_config(config_setting_t *conf)
         conf_get_string(imap_config.pkey, value);
     }
 
+    driver = calloc(1, sizeof(struct imap_driver));
+    if (driver == NULL)
+        return 1;
+
+    driver->config = &imap_config;
+    module->priv = driver;
+
     return 0;
 }
 
-struct imap_driver *
-imap_driver_init(struct event_base *base)
+int
+imap_driver_init(struct module *module, struct event_base *base)
 {
-    struct imap_driver *driver;
-    struct imap_handler *handler;
+    struct imap_driver *driver = module->priv;
+    struct imap_config *config;
+    struct imap_handler *handler = handlers;
     struct sockaddr_in6 sin;
     int socklen = sizeof(sin);
 
-    assert(base);
+    assert(driver && driver->config && base);
+    config = driver->config;
 
-    driver = calloc(1, sizeof(struct imap_driver));
-    if (driver == NULL) {
-        return NULL;
-    }
     driver->base = base;
+    driver->dnsbase = get_dnsbase();
 
     for (handler = handlers; handler->command; handler++) {
         /* handle the private handler storage */
         if (avl_insert(&driver->commands, handler, imap_handler_cmp, avl_dup_error)) {
-            return NULL;
+            return 1;
         }
     }
 
     driver->ssl_ctx = new_ssl_ctx(imap_config.cert, imap_config.pkey);
     if (driver->ssl_ctx == NULL) {
-        free(driver);
-        return NULL;
+        return 1;
     }
 
-    if (evutil_parse_sockaddr_port(imap_config.listen, (struct sockaddr *)&sin, &socklen)) {
-        free(driver);
-        return NULL;
+    if (evutil_parse_sockaddr_port(config->listen, (struct sockaddr *)&sin, &socklen)) {
+        return 1;
     }
 
     /* after startup dependency notifications are available, create it in
@@ -153,11 +164,10 @@ imap_driver_init(struct event_base *base)
 
     if (!driver->listener) {
         fprintf(stderr, "Could not create a listener!\n");
-        free(driver);
-        return NULL;
+        return 1;
     }
 
-    return driver;
+    return 0;
 }
 
 static void

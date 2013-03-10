@@ -19,7 +19,7 @@ $(PROGRAM):
 
 ldap: lber.c io_handler.h
 
-main: imap.c ssl.c config.c avl/avl.o
+main: imap.c ssl.c config.c module.c avl/avl.o
 
 clean:
 	rm -rf $(PROGRAM) $(wildcard *.o */*.o) core

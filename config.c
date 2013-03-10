@@ -1,6 +1,5 @@
 #include "config.h"
-/*FIXME: will go away with a proper callback mech */
-#include "imap.h"
+#include "module.h"
 #include "avl/avl.h"
 #include <stdlib.h>
 #include <string.h>
@@ -65,6 +64,7 @@ process_config_file(struct config *config)
     int rc;
     config_t cfg;
     config_setting_t *root;
+    struct module **p;
 
     config_init(&cfg);
 
@@ -82,7 +82,18 @@ process_config_file(struct config *config)
     }
     root = config_root_setting(&cfg);
 
-    rc = imap_driver_config(config_setting_get_member(root, "imap"));
+    for (p = modules; *p; p++) {
+        struct module *module = *p;
+        rc = register_module(module);
+        if (rc)
+            break;
+
+        if (module->conf) {
+            rc = module->conf(module, config_setting_get_member(root, module->name));
+            if (rc)
+                break;
+        }
+    }
 
     config_destroy(&cfg);
     return rc;
