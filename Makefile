@@ -1,7 +1,7 @@
 #!/usr/bin/make -f
 
 CC = gcc
-PROGRAM = main ldap
+PROGRAM = main
 LDLIBS = -levent -lssl -lldap -llber -levent_openssl -lcrypto -lconfig
 CPPFLAGS += -I $(LIBEVENT_PATH)/include
 CFLAGS = -g -Wall
@@ -16,8 +16,6 @@ endif
 all: $(PROGRAM)
 
 $(PROGRAM):
-
-ldap: lber.c io_handler.h
 
 main: imap.c ssl.c config.c module.c avl/avl.o
 
