@@ -195,6 +195,7 @@ listen_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *
         return;
     }
 
+    bufferevent_write(bev, "* CAPABILITY IMAP4rev1 STARTTLS" CRLF, 33);
     printf("A connection\n");
     imap_driver_install(bev, driver);
 }
@@ -331,7 +332,8 @@ imap_capability(struct imap_context *ctx, struct imap_request *req, void *priv)
     struct bufferevent *bev = ctx->client_bev;
     struct evbuffer *output = bufferevent_get_output(bev);
 
-    evbuffer_add_printf(output, "%s CAPABILITY STARTTLS AUTH=PLAIN LOGINDISABLED IMAP4rev1" CRLF, req->tag.bv_val);
+    evbuffer_add_printf(output, "* CAPABILITY IMAP4rev1 STARTTLS AUTH=PLAIN LOGINDISABLED" CRLF);
+    evbuffer_add_printf(output, "%s OK CAPABILITY completed" CRLF, req->tag.bv_val);
     return IMAP_OK;
 }
 
