@@ -3,6 +3,14 @@
 
 #include "avl/avl.h"
 
+#define conf_get_string(target, setting) \
+    do { \
+        const char *val = config_setting_get_string(setting); \
+        if (val != NULL) { \
+            asprintf(&(target), "%s", val); \
+        } \
+    } while (0)
+
 struct config {
     int debug, shutdown;
     char *conffile;

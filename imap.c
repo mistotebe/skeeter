@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "imap.h"
+#include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
@@ -33,6 +34,12 @@ static struct imap_handler handlers[] = {
     { NULL }
 };
 
+static struct imap_config imap_config = {
+    .listen = "127.0.0.1:1143",
+    .default_host = "localhost",
+    .default_port = 143
+};
+
 int
 imap_handler_cmp(const void *left, const void *right)
 {
@@ -41,27 +48,82 @@ imap_handler_cmp(const void *left, const void *right)
     return strcasecmp(l->command, r->command);
 }
 
+int
+imap_driver_config(config_setting_t *conf)
+{
+    config_setting_t *setting, *value;
+    struct imap_driver *driver;
+    int port;
+
+    if (conf == NULL)
+        return 1;
+
+    setting = config_setting_get_member(conf, "listen");
+    if (setting) {
+        /* in the future there are going to be more listen addresses but not
+         * right now */
+        value = config_setting_get_elem(setting, 0);
+        if (value == NULL)
+            return 1;
+
+        conf_get_string(imap_config.listen, value);
+    }
+
+    /*TODO: prime for a rewrite */
+    setting = config_setting_get_member(conf, "defaults");
+    if (setting) {
+
+        value = config_setting_get_elem(setting, 0);
+        if (value == NULL)
+            return 1;
+
+        conf_get_string(imap_config.default_host, value);
+
+        value = config_setting_get_elem(setting, 1);
+        if (value == NULL)
+            return 1;
+
+        port = config_setting_get_int(value);
+        if ((port > 0) && (port <= 65535)) {
+            imap_config.default_port = port;
+        } else {
+            return 1;
+        }
+    }
+
+    setting = config_setting_get_member(conf, "tls");
+    if (setting != NULL) {
+        value = config_setting_get_elem(setting, 0);
+        if (value == NULL)
+            return 1;
+
+        conf_get_string(imap_config.cert, value);
+
+        value = config_setting_get_elem(setting, 1);
+        if (value == NULL)
+            return 1;
+
+        conf_get_string(imap_config.pkey, value);
+    }
+
+    return 0;
+}
+
 struct imap_driver *
-imap_driver_init(struct event_base *base, char *host, int port, int lport)
+imap_driver_init(struct event_base *base)
 {
     struct imap_driver *driver;
     struct imap_handler *handler;
     struct sockaddr_in6 sin;
     int socklen = sizeof(sin);
 
-    memset(&sin, 0, socklen);
-    sin.sin6_family = AF_INET6;
-    sin.sin6_addr = in6addr_any;
-    sin.sin6_port = htons(lport);
+    assert(base);
 
     driver = calloc(1, sizeof(struct imap_driver));
     if (driver == NULL) {
         return NULL;
     }
     driver->base = base;
-
-    driver->remote_host = host;
-    driver->remote_port = port;
 
     for (handler = handlers; handler->command; handler++) {
         /* handle the private handler storage */
@@ -70,8 +132,13 @@ imap_driver_init(struct event_base *base, char *host, int port, int lport)
         }
     }
 
-    driver->ssl_ctx = new_ssl_ctx("cert", "pkey");
+    driver->ssl_ctx = new_ssl_ctx(imap_config.cert, imap_config.pkey);
     if (driver->ssl_ctx == NULL) {
+        free(driver);
+        return NULL;
+    }
+
+    if (evutil_parse_sockaddr_port(imap_config.listen, (struct sockaddr *)&sin, &socklen)) {
         free(driver);
         return NULL;
     }
@@ -292,7 +359,7 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
         p++;
     } else {
         // use a default domain
-        p = ctx->driver->remote_host;
+        p = ctx->driver->config->default_host;
     }
 
     end = strchrnul(p, ' ');
@@ -304,7 +371,7 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
 
     server_bev = bufferevent_socket_new(ctx->driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(server_bev, EV_READ|EV_WRITE);
-    bufferevent_socket_connect_hostname(server_bev, ctx->driver->dnsbase, AF_UNSPEC, servername, ctx->driver->remote_port);
+    bufferevent_socket_connect_hostname(server_bev, ctx->driver->dnsbase, AF_UNSPEC, servername, ctx->driver->config->default_port);
     bufferevent_setcb(server_bev, NULL, NULL, server_connect_cb, ctx);
 
     // copy over client data, CRLF in request has been skipped, so append that

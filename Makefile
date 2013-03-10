@@ -2,7 +2,7 @@
 
 CC = gcc
 PROGRAM = main ldap
-LDLIBS = -levent -lssl -lldap -llber -levent_openssl -lcrypto
+LDLIBS = -levent -lssl -lldap -llber -levent_openssl -lcrypto -lconfig
 CPPFLAGS += -I $(LIBEVENT_PATH)/include
 CFLAGS = -g -Wall
 
@@ -19,7 +19,7 @@ $(PROGRAM):
 
 ldap: lber.c io_handler.h
 
-main: imap.c ssl.c avl/avl.o
+main: imap.c ssl.c config.c avl/avl.o
 
 clean:
 	rm -rf $(PROGRAM) $(wildcard *.o */*.o) core

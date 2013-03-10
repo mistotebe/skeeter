@@ -1,0 +1,89 @@
+#include "config.h"
+/*FIXME: will go away with a proper callback mech */
+#include "imap.h"
+#include "avl/avl.h"
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <errno.h>
+#include <getopt.h>
+#include <libconfig.h>
+
+static const char *shortopts = "f:d:v";
+static struct option options[] = {
+    { NULL }
+};
+
+struct config config = {
+    .conffile = "/etc/skeeter.conf"
+};
+
+int
+parse_options(int argc, char **argv, struct config *config)
+{
+    int opt, option_index;
+
+    while ((opt = getopt_long(argc, argv, shortopts,
+                options, &option_index)) != -1)
+    {
+        switch (opt)
+        {
+            case 0:
+                /* a separate long option */
+                break;
+            case 'd':
+                /* do not detach - we are in debug mode */
+                config->debug = atoi(optarg);
+                break;
+            case 'f':
+                /* we have a config */
+                config->conffile = optarg;
+                break;
+            case 'v':
+                /* print version and end */
+                printf("Skeeter\n");
+                exit(0);
+                break;
+            default:
+                /* garbage in, bail */
+                fprintf(stderr, "Unknown parameter '%c'\n", opt);
+        }
+    }
+
+    if (optind < argc)
+    {
+        /* there is something unexpected on the command line, bail too */
+        return 1;
+    }
+
+    return 0;
+}
+
+int
+process_config_file(struct config *config)
+{
+    int rc;
+    config_t cfg;
+    config_setting_t *root;
+
+    config_init(&cfg);
+
+    /*TODO: yeah, there should be a saner way of assigning defaults */
+    if (!config->conffile) {
+        config->conffile = "/etc/skeeter.conf";
+    }
+
+    if (config_read_file(&cfg, config->conffile) == CONFIG_FALSE) {
+        /* failure */
+        fprintf(stderr, "Failure reading configuration file '%s' at line %d: %s",
+                config_error_file(&cfg), config_error_line(&cfg),
+                config_error_text(&cfg));
+        return 1;
+    }
+    root = config_root_setting(&cfg);
+
+    rc = imap_driver_config(config_setting_get_member(root, "imap"));
+
+    config_destroy(&cfg);
+    return rc;
+}

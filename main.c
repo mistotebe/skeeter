@@ -5,10 +5,8 @@
 #include <stdio.h>
 #include <signal.h>
 
+#include "config.h"
 #include "imap.h"
-
-#define DEFAULT_SERVER "localhost"
-#define DEFAULT_PORT 1143
 
 static void signal_cb(evutil_socket_t, short, void *);
 
@@ -18,25 +16,12 @@ int main(int argc, char** argv)
     struct event *signal_event;
     struct imap_driver *driver;
 
-    char *rhost = DEFAULT_SERVER;
-    int rport = DEFAULT_PORT;
-    int port = 8080;
-
-    if (argc > 1) {
-        port = atoi(argv[1]);
-        if (!port) {
-            fprintf(stderr, "Please specify a valid port number or do not provide any parameters for a default one!\n");
-            return 1;
-        }
+    if (parse_options(argc, argv, &config)) {
+        return 1;
     }
 
-    if (argc > 3) {
-        rhost = argv[2];
-        rport = atoi(argv[3]);
-        if (!rport) {
-            fprintf(stderr, "Please specify a valid port number or do not provide any parameters for a default one!\n");
-            return 1;
-        }
+    if (process_config_file(&config)) {
+        return 1;
     }
 
     base = event_base_new();
@@ -45,7 +30,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    driver = imap_driver_init(base, rhost, rport, port);
+    driver = imap_driver_init(base);
+    if (!driver) {
+        fprintf(stderr, "Could not initialize imap!\n");
+        return 1;
+    }
 
     signal_event = event_new(base, SIGINT, EV_SIGNAL, signal_cb, base);
 

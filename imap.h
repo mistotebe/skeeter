@@ -7,6 +7,7 @@
 #include <event2/event.h>
 #include <event2/dns.h>
 #include <event2/listener.h>
+#include <libconfig.h>
 
 #define IMAP_OK 0
 #define IMAP_TOCONTINUE 1
@@ -17,6 +18,7 @@
 #define CRLF "\r\n"
 
 struct imap_driver;
+struct imap_config;
 struct imap_context;
 struct imap_request;
 
@@ -28,13 +30,19 @@ typedef enum {
     imap_select
 } imap_state;
 
+struct imap_config {
+    char *listen;
+    char *default_host;
+    int default_port;
+    char *cert, *pkey;
+};
+
 struct imap_driver {
     struct event_base *base;
     struct evdns_base *dnsbase;
     struct evconnlistener *listener;
 
-    char *remote_host;
-    int remote_port;
+    struct imap_config *config;
 
     Avlnode *commands;
     SSL_CTX *ssl_ctx;
@@ -62,7 +70,8 @@ struct imap_request {
 
 int imap_handler_cmp(const void *, const void *);
 
-struct imap_driver *imap_driver_init(struct event_base *, char *, int, int);
+int imap_driver_config(config_setting_t *);
+struct imap_driver *imap_driver_init(struct event_base *);
 int imap_handle_request(struct imap_context *, struct imap_request *);
 
 #endif /* _IMAP_H */
