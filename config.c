@@ -49,8 +49,7 @@ parse_options(int argc, char **argv, struct config *config)
         }
     }
 
-    if (optind < argc)
-    {
+    if (optind < argc) {
         /* there is something unexpected on the command line, bail too */
         return 1;
     }

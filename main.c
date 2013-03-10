@@ -35,8 +35,7 @@ int main(int argc, char** argv)
         if (!module->init)
             continue;
 
-        if (module->init(module, base))
-        {
+        if (module->init(module, base)) {
             fprintf(stderr, "Could not initialize module '%s'\n", module->name);
             return 1;
         }

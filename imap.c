@@ -294,8 +294,7 @@ imap_driver_install(struct bufferevent *bev, struct imap_driver *driver)
     tval.tv_usec = 0;
 
     bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
-    bufferevent_enable(bev, EV_WRITE);
-    bufferevent_enable(bev, EV_READ);
+    bufferevent_enable(bev, EV_READ|EV_WRITE);
     bufferevent_set_timeouts(bev, &tval, &tval);
     return IMAP_OK;
 }
@@ -356,8 +355,7 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
     }
 
     bufferevent_setcb(bev, readcb, writecb, eventcb, orig_ctx);
-    bufferevent_enable(bev, EV_WRITE);
-    bufferevent_enable(bev, EV_READ);
+    bufferevent_enable(bev, EV_READ|EV_WRITE);
     ctx->client_bev = bev;
 
     return IMAP_OK;
@@ -435,8 +433,8 @@ proxy_cb(struct bufferevent *source, void *priv)
 {
     struct imap_context *ctx = priv;
     struct evbuffer *input = bufferevent_get_input(source);
-    // pick the right direction, if reading from client_bev, dump to server_bev
-    // and vice versa
+    /* pick the right direction, if reading from client_bev, dump to server_bev
+     * and vice versa */
     struct bufferevent *target = (source == ctx->client_bev) ?
                                 ctx->server_bev : ctx->client_bev;
 
