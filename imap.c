@@ -210,8 +210,9 @@ conn_eventcb(struct bufferevent *bev, short events, void *user_data)
         printf("OpenSSL error %lu\n", bufferevent_get_openssl_error(bev));
         return;
     }
-    printf("Freeing connection\n");
+    printf("Freeing connection data\n");
     bufferevent_free(bev);
+    free(user_data);
 }
 
 static void
@@ -423,9 +424,10 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
         bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, server_connect_cb, ctx);
         return;
     }
-    printf("Freeing connections\n");
+    printf("Freeing connection data\n");
     bufferevent_free(ctx->server_bev);
     bufferevent_free(ctx->client_bev);
+    free(ctx);
 }
 
 static void
