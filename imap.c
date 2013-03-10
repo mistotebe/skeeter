@@ -395,7 +395,8 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
 
     ctx->server_bev = server_bev;
 
-    //bufferevent_disable(client_bev, EV_READ|EV_WRITE);
+    /* stop reading on the connection until we're connected to server */
+    bufferevent_disable(client_bev, EV_READ);
 
     free(servername);
 
@@ -420,6 +421,7 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
         printf("Looks like we are connected, proxying...\n");
         bufferevent_setcb(ctx->server_bev, proxy_cb, NULL, server_connect_cb, ctx);
         bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, server_connect_cb, ctx);
+        bufferevent_enable(ctx->client_bev, EV_READ);
         return;
     }
     printf("Freeing connection data\n");
