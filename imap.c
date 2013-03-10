@@ -35,7 +35,7 @@ static struct imap_handler handlers[] = {
     { NULL }
 };
 
-static struct imap_config imap_config = {
+static struct imap_config config_default = {
     .listen = "127.0.0.1:1143",
     .default_host = "localhost",
     .default_port = 143
@@ -59,11 +59,17 @@ int
 imap_driver_config(struct module *module, config_setting_t *conf)
 {
     config_setting_t *setting, *value;
+    struct imap_config *config;
     struct imap_driver *driver;
     int port;
 
     if (conf == NULL)
         return 1;
+
+    config = malloc(sizeof(struct imap_config));
+    if (config == NULL)
+        return 1;
+    *config = config_default;
 
     setting = config_setting_get_member(conf, "listen");
     if (setting) {
@@ -73,7 +79,7 @@ imap_driver_config(struct module *module, config_setting_t *conf)
         if (value == NULL)
             return 1;
 
-        conf_get_string(imap_config.listen, value);
+        conf_get_string(config->listen, value);
     }
 
     /*TODO: prime for a rewrite */
@@ -84,7 +90,7 @@ imap_driver_config(struct module *module, config_setting_t *conf)
         if (value == NULL)
             return 1;
 
-        conf_get_string(imap_config.default_host, value);
+        conf_get_string(config->default_host, value);
 
         value = config_setting_get_elem(setting, 1);
         if (value == NULL)
@@ -92,7 +98,7 @@ imap_driver_config(struct module *module, config_setting_t *conf)
 
         port = config_setting_get_int(value);
         if ((port > 0) && (port <= 65535)) {
-            imap_config.default_port = port;
+            config->default_port = port;
         } else {
             return 1;
         }
@@ -104,20 +110,20 @@ imap_driver_config(struct module *module, config_setting_t *conf)
         if (value == NULL)
             return 1;
 
-        conf_get_string(imap_config.cert, value);
+        conf_get_string(config->cert, value);
 
         value = config_setting_get_elem(setting, 1);
         if (value == NULL)
             return 1;
 
-        conf_get_string(imap_config.pkey, value);
+        conf_get_string(config->pkey, value);
     }
 
     driver = calloc(1, sizeof(struct imap_driver));
     if (driver == NULL)
         return 1;
 
-    driver->config = &imap_config;
+    driver->config = config;
     module->priv = driver;
 
     return 0;
@@ -145,7 +151,7 @@ imap_driver_init(struct module *module, struct event_base *base)
         }
     }
 
-    driver->ssl_ctx = new_ssl_ctx(imap_config.cert, imap_config.pkey);
+    driver->ssl_ctx = new_ssl_ctx(config->cert, config->pkey);
     if (driver->ssl_ctx == NULL) {
         return 1;
     }
