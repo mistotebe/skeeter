@@ -24,8 +24,8 @@ static void proxy_cb(struct bufferevent *, void *);
 static void server_connect_cb(struct bufferevent *, short, void *);
 
 static struct imap_handler handlers[] = {
+    { "STARTTLS", imap_starttls }, // will not be registered by default
     { "CAPABILITY", imap_capability },
-    { "STARTTLS", imap_starttls },
     { "LOGIN", imap_login },
     /*
     { "NOOP", imap_noop },
@@ -144,16 +144,21 @@ imap_driver_init(struct module *module, struct event_base *base)
     driver->base = base;
     driver->dnsbase = get_dnsbase();
 
-    for (handler = handlers; handler->command; handler++) {
+    if (config->cert) {
+        driver->ssl_ctx = new_ssl_ctx(config->cert, config->pkey);
+        if (driver->ssl_ctx == NULL) {
+            return 1;
+        }
+    } else {
+        /* skip the STARTTLS handler */
+        handler += 1;
+    }
+
+    for (; handler->command; handler++) {
         /* handle the private handler storage */
         if (avl_insert(&driver->commands, handler, imap_handler_cmp, avl_dup_error)) {
             return 1;
         }
-    }
-
-    driver->ssl_ctx = new_ssl_ctx(config->cert, config->pkey);
-    if (driver->ssl_ctx == NULL) {
-        return 1;
     }
 
     if (evutil_parse_sockaddr_port(config->listen, (struct sockaddr *)&sin, &socklen)) {
