@@ -28,10 +28,11 @@ extern struct module imap_module;
 typedef int (*imap_request_handler)(struct imap_context *, struct imap_request *, void *);
 
 typedef enum {
-    imap_nonauth,
-    imap_auth,
-    imap_select
-} imap_state;
+    /* only login params can contain literal */
+    IMAP_MULTILINE = 0x1,
+    IMAP_TLS = 0x2,
+    IMAP_AUTHENTICATED = 0x4
+} imap_flags;
 
 struct imap_config {
     char *listen;
@@ -55,7 +56,7 @@ struct imap_context {
     struct imap_driver *driver;
     struct bufferevent *client_bev, *server_bev;
 
-    imap_state state;
+    imap_flags state;
 };
 
 struct imap_handler {

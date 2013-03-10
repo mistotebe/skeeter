@@ -340,6 +340,11 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
     bufferevent_event_cb eventcb;
     void *orig_ctx;
 
+    if (ctx->state & IMAP_TLS) {
+        evbuffer_add_printf(output, "%s BAD TLS layer already in place" CRLF, req->tag.bv_val);
+        return IMAP_OK;
+    }
+
     /* retrieve the callbacks to apply them again on the filtering bev */
     bufferevent_getcb(bev, &readcb, &writecb, &eventcb, &orig_ctx);
 
@@ -357,6 +362,7 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
     bufferevent_setcb(bev, readcb, writecb, eventcb, orig_ctx);
     bufferevent_enable(bev, EV_READ|EV_WRITE);
     ctx->client_bev = bev;
+    ctx->state |= IMAP_TLS;
 
     return IMAP_OK;
 }
