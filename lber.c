@@ -8,7 +8,7 @@
 
 #include <unistd.h>
 
-static int 
+static int
 sb_libevent_setup(Sockbuf_IO_Desc *sbiod, void *arg)
 {
     printf( "%s: invoked\n", __func__ );
@@ -61,9 +61,15 @@ static ber_slen_t
 sb_libevent_read(Sockbuf_IO_Desc *sbiod, void *buf, ber_len_t len)
 {
     struct bufferevent *bev = sbiod->sbiod_pvt;
+    ber_slen_t read;
 
     printf( "%s: invoked\n", __func__ );
-    return bufferevent_read(bev, buf, len);
+    read = bufferevent_read(bev, buf, len);
+    /* Were we to return a zero length read without setting errno, liblber
+     * would think the socket is closed and give up on it */
+    if (!read)
+        errno = EWOULDBLOCK;
+    return read;
 }
 
 static ber_slen_t
@@ -99,12 +105,12 @@ sb_libevent_close(Sockbuf_IO_Desc *sbiod)
 }
 
 Sockbuf_IO ber_sockbuf_io_libevent = {
-	sb_libevent_setup,	/* sbi_setup */
-	sb_libevent_remove,			/* sbi_remove */
-	sb_libevent_ctrl,		/* sbi_ctrl */
-	sb_libevent_read,		/* sbi_read */
-	sb_libevent_write,		/* sbi_write */
-	sb_libevent_close		/* sbi_close */
+    sb_libevent_setup,  /* sbi_setup */
+    sb_libevent_remove, /* sbi_remove */
+    sb_libevent_ctrl,   /* sbi_ctrl */
+    sb_libevent_read,   /* sbi_read */
+    sb_libevent_write,  /* sbi_write */
+    sb_libevent_close   /* sbi_close */
 };
 
 int

@@ -23,14 +23,14 @@ init_ssl(void)
 }
 
 SSL_CTX *
-new_server_ctx(char *cert, char *pkey)
+new_ssl_ctx(char *cert, char *pkey)
 {
     SSL_CTX  *server_ctx;
 
     if (init_ssl())
         return NULL;
 
-    server_ctx = SSL_CTX_new(SSLv23_server_method());
+    server_ctx = SSL_CTX_new(SSLv23_method());
 
     if (!SSL_CTX_use_certificate_chain_file(server_ctx, cert)) {
         printf("Could not read server certificate file\n");
