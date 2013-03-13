@@ -194,7 +194,7 @@ int ldap_driver_init(struct module *module, struct event_base *base)
     struct timeval initial_timeout = { 0, 0 };
 
     driver->reconnect_event = event_new(base, -1, EV_TIMEOUT, ldap_driver_connect_cb,
-                                (char *) "LDAP handling event");
+                                driver);
     if (driver->reconnect_event == NULL) {
         fprintf(stderr, "Failed to create LDAP handling event\n");
         return 1;
