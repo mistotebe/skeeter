@@ -163,7 +163,7 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
 
     // otherwise cleanup and restart
     ldap_connect_cleanup:
-        bufferevent_free(bev);
+        bufferevent_free(bev); bev = NULL;
         // wait for some time and try reconnect
         event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
 }
@@ -176,8 +176,9 @@ void ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
     struct ldap_driver *driver = ctx;
     struct ldap_config *conf = driver->config;
 
-    if (driver->bev != NULL)
-        bufferevent_free(driver->bev);
+    if (driver->bev != NULL) {
+        bufferevent_free(driver->bev); driver->bev = NULL;
+    }
 
     driver->bev = bufferevent_socket_new(driver->base, fd, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(driver->bev, EV_READ|EV_WRITE);
