@@ -18,6 +18,7 @@ struct request {
     int msgid;
     ldap_cb cb;
     void *ctx;
+    LDAPMessage *msg;
 };
 
 struct ldap_config {
