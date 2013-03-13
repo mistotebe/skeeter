@@ -24,7 +24,7 @@ sb_libevent_all_sent(struct bufferevent *bev, void *ctx)
 
     assert( evbuffer_get_length(buffer) == 0 );
 
-    bufferevent_free(bev);
+    bufferevent_free(bev); bev = NULL;
 }
 
 static int

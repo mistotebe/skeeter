@@ -217,7 +217,7 @@ conn_eventcb(struct bufferevent *bev, short events, void *user_data)
         return;
     }
     printf("Freeing connection data\n");
-    bufferevent_free(bev);
+    bufferevent_free(bev); bev = NULL;
     free(user_data);
 }
 
@@ -438,8 +438,8 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
         return;
     }
     printf("Freeing connection data\n");
-    bufferevent_free(ctx->server_bev);
-    bufferevent_free(ctx->client_bev);
+    bufferevent_free(ctx->server_bev); ctx->server_bev = NULL;
+    bufferevent_free(ctx->client_bev); ctx->client_bev = NULL;
     free(ctx);
 }
 
