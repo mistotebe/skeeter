@@ -136,11 +136,12 @@ void ldap_bind_cb(struct bufferevent *bev, void *ctx) {
 void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
 {
     struct ldap_driver *driver = ctx;
-    int rc;
+    struct berval password = {0, NULL};
+    int rc, msgid;
     Sockbuf *sb;
 
     if (events & BEV_EVENT_CONNECTED) {
-        if (ldap_init_fd(bufferevent_getfd(bev), LDAP_PROTO_EXT, driver->config->uri, driver->ld))
+        if (ldap_init_fd(bufferevent_getfd(bev), LDAP_PROTO_EXT, driver->config->uri, &(driver->ld)))
             goto ldap_connect_cleanup;
         ldap_get_option(driver->ld, LDAP_OPT_SOCKBUF, &sb);
         if (sb == NULL) {
@@ -152,12 +153,15 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
             goto ldap_connect_cleanup;
         }
         errno = 0;
-        rc = ldap_simple_bind(driver->ld, driver->config->bind_dn, driver->config->password);
+        bufferevent_setcb(bev, ldap_bind_cb, NULL, ldap_error_cb, driver);
+        password.bv_val = ber_strdup(driver->config->password);
+        password.bv_len = strlen(password.bv_val);
+        rc = ldap_sasl_bind(driver->ld, driver->config->bind_dn, LDAP_SASL_SIMPLE, &password, NULL, NULL, &msgid);
         if (rc != LDAP_SUCCESS) {
             fprintf(stderr, "error during bind: %s\n", ldap_err2string(rc));
+            // restart connection after timeout
         }
 
-        bufferevent_setcb(bev, ldap_bind_cb, NULL, ldap_error_cb, driver);
         return;
     }
 
