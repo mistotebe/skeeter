@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #define config_entry(obj, name) { #name, &(obj) }
+int ldap_init_fd(ber_socket_t fd, int proto, LDAP_CONST char *url, LDAP **ldp );
 #define LDAP_PROTO_EXT 4
 
 #define DEFAULT_URI "ldap://ldap.example.com:389/o=example.com?mailHost?sub?(uid=%u)"
