@@ -210,9 +210,8 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
 {
     /* update the config with the appropriate values and register as "ldap" so
      * that "imap" can retrieve the driver */
-    config_setting_t *setting;
+    config_setting_t *setting, *value;
     struct ldap_driver *driver;
-    const char *name;
     int i,tout;
 
     if (conf == NULL)
@@ -220,12 +219,8 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
 
     // first parse the uri - it should allocate the LDAPURLDesc structure
     setting = config_setting_get_member(conf, "uri");
-    if (setting != NULL) {
-        name = config_setting_get_string(setting);
-        if (name != NULL) {
-            asprintf(ldap_config.uri, "%s", name);
-        }
-    }
+    if (setting != NULL)
+        conf_get_string(ldap_config.uri, setting);
 
     if (ldap_is_ldap_url(ldap_config.uri)) {
         if (ldap_url_parse(ldap_config.uri,&(ldap_config.data))) {
@@ -247,29 +242,49 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
             config_entry(ldap_config.password, password),
             config_entry(ldap_config.data->lud_dn, search_base),
             config_entry(ldap_config.data->lud_filter, filter),
-            config_entry(ldap_config.data->lud_attrs, attribute)
         };
-    // TODO: attributes must be in null terminated list of strings, should be handled independently from other entries
 
+    // we can not use conf_get_string macro because it is wrongly hanling
+    // the pointer to the target variable
     for (i=0; i < sizeof(simple_entries)/sizeof(*simple_entries); i++) {
         setting = config_setting_get_member(conf, simple_entries[i].name);
         if (setting == NULL)
             continue;
+        const char *val = config_setting_get_string(setting);
+        if (val != NULL)
+            asprintf(simple_entries[i].addr, "%s", val);
+    }
 
-        name = config_setting_get_string(setting);
-        if ( name != NULL ) {
-            /* lazy, lazy */
-           asprintf(simple_entries[i].addr,"%s",name);
+    setting = config_setting_get_member(conf, "search_attribute");
+    if (setting != NULL) {
+        if (ldap_config.data->lud_attrs != NULL) {
+            for(i=0; i < sizeof(ldap_config.data->lud_attrs)/sizeof(*ldap_config.data->lud_attrs); i++){
+                free(ldap_config.data->lud_attrs[i]);
+            }
+            free(ldap_config.data->lud_attrs);
         }
+        i = config_setting_length(setting);
+        ldap_config.data->lud_attrs = calloc(i+1,sizeof(char *));
+        if(ldap_config.data->lud_attrs == NULL)
+            return 1;
+        i=0;
+        while((value=config_setting_get_elem(setting,i)) != NULL)
+        {
+            conf_get_string(ldap_config.data->lud_attrs[i],value);
+            i++;
+        }
+        ldap_config.data->lud_attrs[i] = NULL;
     }
 
     setting = config_setting_get_member(conf, "reconnect_timeout");
     if (setting != NULL) {
         tout = config_setting_get_int(setting);
-        if (tout >= 0) {
-            ldap_config.reconnect_tout.tv_sec = tout;
-        }
+        if (tout >= 0) ldap_config.reconnect_tout.tv_sec = tout;
     }
+
+    driver = calloc(1, sizeof(struct ldap_driver));
+    if(driver == NULL)
+        return 1;
 
     driver->config = &ldap_config;
     module->priv = driver;
