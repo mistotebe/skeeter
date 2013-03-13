@@ -51,10 +51,10 @@ struct module ldap_module = {
     .init = ldap_driver_init,
 };
 
-static int request_cmp(void *left, void *right)
+static int request_cmp(const void *left, const void *right)
 {
-    struct request *l = left;
-    struct request *r = right;
+    const struct request *l = left;
+    const struct request *r = right;
     return l->msgid - r->msgid;
 }
 
