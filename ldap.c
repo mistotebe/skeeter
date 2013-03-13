@@ -92,19 +92,32 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx) {
     LDAPMessage *res;
     int msgtype, errcode;
     static struct timeval poll_time = {0, 0};
-
-    char *attribute_values[] = {{NULL}};
+    struct request *found;
 
     while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &poll_time, &res )) > 0 ) {
-        errcode = get_ldap_errcode(driver->ld, res);
-        if (errcode != LDAP_SUCCESS) {
-            fprintf(stderr, "Error during reading results: %s\n", ldap_err2string(errcode));
-            //TODO: restart connection to ldap or continue?
-        } else {
+        // we are interested in search responses only
+        if (msgtype == LDAP_RES_SEARCH_ENTRY || msgtype == LDAP_RES_SEARCH_RESULT) {
+            struct request needle = { .msgid = ldap_msgid(res) };
+            errcode = get_ldap_errcode(driver->ld, res);
+            found = avl_find(driver->pending_requests, &needle, request_cmp);
+            // it is probably too early or too lateto get the result
+            if(found == NULL) {
+                fprintf(stderr, "storing requests into avl tooks long time\n");
+                continue;
+            }
+
             if ( msgtype == LDAP_RES_SEARCH_ENTRY ) {
                 // read the result and store it into avl
-            } else if ( msgtype == LDAP_RES_SEARCH_RESULT ) {
-                // search is done, process the request
+                found->msg = res;
+            } else {
+                if (errcode == LDAP_SUCCESS) {
+                    found->cb(found->msg,found->ctx);
+                } else {
+                    fprintf(stderr, "Error during reading results: %s\n", ldap_err2string(errcode));
+                    found->cb(NULL,found->ctx);
+                }
+                if(found->msg != NULL) free(found->msg);
+                avl_delete(&driver->pending_requests, &needle, request_cmp);
             }
         }
     }
