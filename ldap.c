@@ -189,7 +189,7 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
 // therefore it deserves own function
 void ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
 {
-    struct evdns_base *dnsbase = get_dnsbase(); // not working yes
+    struct evdns_base *dnsbase = get_dnsbase();
     struct ldap_driver *driver = ctx;
     struct ldap_config *conf = driver->config;
 
