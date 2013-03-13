@@ -17,7 +17,7 @@ all: $(PROGRAM)
 
 $(PROGRAM):
 
-main: imap.c ldap.c ssl.c config.c module.c avl/avl.o
+main: imap.c ldap.c ssl.c config.c module.c lber.c avl/avl.o
 
 clean:
 	rm -rf $(PROGRAM) $(wildcard *.o */*.o) core
