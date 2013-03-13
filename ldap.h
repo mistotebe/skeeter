@@ -17,7 +17,7 @@ struct user_info {
 int ldap_driver_init(struct module *, struct event_base *);
 int ldap_driver_config(struct module *, config_setting_t *);
 
-int get_user_info(struct user_info *, ldap_cb, /* int *, */ void *);
+int get_user_info(struct module *, struct user_info *, ldap_cb, /* int *, */ void *);
 //void abandon_search(int);
 
 #endif /* _SKEETER_LDAP_H */

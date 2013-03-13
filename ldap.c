@@ -390,10 +390,51 @@ char * expand_tokens(char *pattern, char *username, char *domain)
         return NULL;
 }
 
-int get_user_info(struct user_info *info, ldap_cb cb, void *ctx)
+int get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *ctx)
 {
+    int msgid, rc;
+    struct ldap_driver *driver = module->priv;
+    struct ldap_config *config = driver->config;
+
+    struct request *req = malloc(sizeof (struct request));
+    if (req == NULL)
+        goto get_user_info_fail;
+
     /* construct the search filter */
+    char *filter = expand_tokens(config->data->lud_filter, info->username, "");
+    if(filter == NULL) {
+        fprintf(stderr, "Failed to construct filter\n");
+        goto get_user_info_fail;
+    }
 
     /* send the search */
+    rc = ldap_search_ext(driver->ld,config->data->lud_dn,
+                         LDAP_SCOPE_SUBTREE, filter,
+                         ldap_config.data->lud_attrs, 0,
+                         NULL, NULL,
+                         NULL, 1, // no timeout set and we want only one result
+                         &msgid);
+
+   if(rc != LDAP_SUCCESS) {
+        fprintf(stderr,"ldap_search failed for filter '%s' with error '%s'\n",filter,ldap_err2string(rc));
+        goto get_user_info_fail;
+    }
+
+    req->msgid = msgid;
+    req->cb = cb;
+    req->ctx = ctx;
+    req->msg = NULL;
+
+    if(avl_insert(&driver->pending_requests, req, request_cmp, avl_dup_error))
+        goto get_user_info_fail;
+
+    return 0;
+
+get_user_info_fail:
+    // respond to client immediately
+    cb(NULL,ctx);
+    if(req != NULL) free(req);
+    if(filter != NULL) free(filter);
+    return 1;
 }
 
