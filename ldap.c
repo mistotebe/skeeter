@@ -1,8 +1,10 @@
+#define _GNU_SOURCE
 #include <event2/bufferevent.h>
 
 #include "avl/avl.h"
 #include "ldap.h"
 #include "io_handler.h"
+#include <lber.h>
 #include <errno.h>
 #include <stdlib.h>
 
