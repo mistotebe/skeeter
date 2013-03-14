@@ -110,7 +110,8 @@ void ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
     }
 }
 
-void ldap_read_cb(struct bufferevent *bev, void *ctx) {
+void ldap_read_cb(struct bufferevent *bev, void *ctx)
+{
     /* try ldap_result and iterate over the results */
 
     /* for each entry, update the pending_requests */
@@ -152,7 +153,8 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx) {
     }
 }
 
-void ldap_bind_cb(struct bufferevent *bev, void *ctx) {
+void ldap_bind_cb(struct bufferevent *bev, void *ctx)
+{
     /* try ldap_result and iterate over the results */
     struct ldap_driver *driver = ctx;
     LDAPMessage *res;
