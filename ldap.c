@@ -61,6 +61,16 @@ static int request_cmp(const void *left, const void *right)
     return l->msgid - r->msgid;
 }
 
+static void request_free(void *req)
+{
+    struct request *r = req;
+    // login failed, inform the client
+    r->cb(NULL,r->ctx);
+    if(r->msg != NULL)
+        ldap_msgfree(r->msg);
+    free(req);
+}
+
 void ldap_connect_cb(struct bufferevent *, short, void *);
 
 int get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
@@ -77,10 +87,27 @@ int get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
     return result;
 }
 
+void ldap_reset_connection(struct ldap_driver *driver)
+{
+    // unbind to free the socket
+    ldap_unbind(driver->ld);
+    bufferevent_free(driver->bev); driver->bev = NULL;
+    // wait for some time and try reconnect
+    event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
+}
+
 void ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
 {
+
+    struct ldap_driver *driver = ctx;
     /* have we lost the connection? Disable the module temporarily and try to
      * create another, possibly after some time has passed */
+    if (events & (BEV_EVENT_ERROR | BEV_EVENT_EOF)) {
+        // call the error handlers
+        // flush the pending requests
+        avl_free(driver->pending_requests);
+        ldap_reset_connection(driver);
+    }
 }
 
 void ldap_read_cb(struct bufferevent *bev, void *ctx) {
@@ -140,8 +167,7 @@ void ldap_bind_cb(struct bufferevent *bev, void *ctx) {
                 return;
             } else {
                 fprintf(stderr, "Bind failed: %s\n", ldap_err2string(errcode));
-                // try binding again after some time
-                event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
+                ldap_reset_connection(driver);
                 return;
             }
         } // ignore other than bind_result responses
@@ -182,9 +208,7 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
 
     // otherwise cleanup and restart
     ldap_connect_cleanup:
-        bufferevent_free(bev); bev = NULL;
-        // wait for some time and try reconnect
-        event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
+        ldap_reset_connection(driver);
 }
 
 // bufferevent creation and callback setting might be used more times
