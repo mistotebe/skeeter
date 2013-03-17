@@ -111,10 +111,10 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx) {
                 found->msg = res;
             } else {
                 if (errcode == LDAP_SUCCESS) {
-                    found->cb(found->msg,found->ctx);
+                    found->cb(driver->ld, found->msg, found->ctx);
                 } else {
                     fprintf(stderr, "Error during reading results: %s\n", ldap_err2string(errcode));
-                    found->cb(NULL,found->ctx);
+                    found->cb(driver->ld, NULL, found->ctx);
                 }
                 if(found->msg != NULL) free(found->msg);
                 avl_delete(&driver->pending_requests, &needle, request_cmp);
@@ -449,8 +449,6 @@ int get_user_info(struct module *module, struct user_info *info, ldap_cb cb, voi
     return 0;
 
 get_user_info_fail:
-    // respond to client immediately
-    cb(NULL,ctx);
     if(req != NULL) free(req);
     if(filter != NULL) free(filter);
     return 1;

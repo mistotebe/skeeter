@@ -5,13 +5,13 @@
 #include "config.h"
 #include "module.h"
 
-typedef void (*ldap_cb)(LDAPMessage *, void *);
+typedef void (*ldap_cb)(LDAP *, LDAPMessage *, void *);
 
 extern struct module ldap_module;
 
 struct user_info {
-    char *username;
-    char * attrs[];
+    char *username, *domain;
+    char **attrs;
 };
 
 int ldap_driver_init(struct module *, struct event_base *);
