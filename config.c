@@ -60,7 +60,7 @@ parse_options(int argc, char **argv, struct config *config)
 int
 process_config_file(struct config *config)
 {
-    int rc;
+    int rc = 0;
     config_t cfg;
     config_setting_t *root;
     struct module **p;
