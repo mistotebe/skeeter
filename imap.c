@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "imap.h"
+#include "ldap.h"
 #include "config.h"
 #include "module.h"
 #include <stdlib.h>
@@ -9,6 +10,7 @@
 #include <event2/bufferevent.h>
 #include <event2/bufferevent_ssl.h>
 #include <event2/listener.h>
+#include <ldap.h>
 
 static int imap_driver_install(struct bufferevent *, struct imap_driver *);
 
@@ -20,6 +22,8 @@ static void conn_eventcb(struct bufferevent *, short, void *);
 static int imap_capability(struct imap_context *ctx, struct imap_request *req, void *priv);
 static int imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv);
 static int imap_login(struct imap_context *ctx, struct imap_request *req, void *priv);
+
+static void search_cb(LDAP *, LDAPMessage *, void *);
 
 static void proxy_cb(struct bufferevent *, void *);
 static void server_connect_cb(struct bufferevent *, short, void *);
@@ -397,26 +401,52 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
 static int
 imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
 {
-    struct bufferevent *server_bev, *client_bev = ctx->client_bev;
-    char *p, *end, *servername;
+    struct bufferevent *client_bev = ctx->client_bev;
+    struct evbuffer *output;
+    struct user_info user_info = {};
+    char *attrs[2] = { "mailhost", NULL };
+    char *p;
     ssize_t len;
+    int rc = IMAP_DONE;
 
-    p = memchr(req->arguments.bv_val, '@', req->arguments.bv_len);
-    if (p) {
-        // skip the @ sign
-        p++;
-    } else {
-        // use a default domain
-        p = ctx->driver->config->default_host;
+    output = bufferevent_get_output(client_bev);
+
+    p = strchr(req->arguments.bv_val, ' ');
+    if (!p) {
+        evbuffer_add_printf(output, "%s NO Invalid command" CRLF, req->tag.bv_val);
+        return IMAP_OK;
     }
 
-    end = strchrnul(p, ' ');
-    len = end - p;
+    // temporarily until we have a way of handling literals
+    if (p[1] == '{' || p[1] == '"') {
+        evbuffer_add_printf(output, "%s BAD Sorry, I don't handle literals yet" CRLF, req->tag.bv_val);
+        return IMAP_OK;
+    }
 
-    servername = malloc(len + 1);
-    memcpy(servername, p, len);
-    servername[len] = '\0';
+    len = p - req->arguments.bv_val;
+    user_info.username = malloc(len + 1);
+    memcpy(user_info.username, req->arguments.bv_val, len);
+    user_info.username[len] = '\0';
 
+    p = memchr(user_info.username, '@', len);
+    if (p) {
+        // skip the @ sign
+        *p = '\0';
+        user_info.domain = p + 1;
+    } else {
+        // use a default domain
+        user_info.domain = ctx->driver->config->default_host;
+    }
+
+    user_info.attrs = attrs;
+    if (get_user_info(ctx->driver->ldap, &user_info, search_cb, ctx)) {
+        evbuffer_add_printf(output, "%s NO Internal server error", req->tag.bv_val);
+        rc = IMAP_SHUTDOWN;
+    }
+
+    free(user_info.username);
+
+    /*
     server_bev = bufferevent_socket_new(ctx->driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(server_bev, EV_READ|EV_WRITE);
     bufferevent_socket_connect_hostname(server_bev, ctx->driver->dnsbase, AF_UNSPEC, servername, ctx->driver->config->default_port);
@@ -427,13 +457,43 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
     bufferevent_write(server_bev, CRLF, 2);
 
     ctx->server_bev = server_bev;
+    */
 
     /* stop reading on the connection until we're connected to server */
     bufferevent_disable(client_bev, EV_READ);
 
-    free(servername);
+    return rc;
+}
 
-    return IMAP_DONE;
+static void
+search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
+{
+    struct imap_context *ctx = priv;
+    struct bufferevent *server_bev;
+    BerValue **servername;
+
+    if (!msg) {
+        // user does not exist
+    }
+
+    servername = ldap_get_values_len(ld, msg, "mailhost");
+    if (!servername || !*servername) {
+        // user not provisioned
+    }
+
+    server_bev = bufferevent_socket_new(ctx->driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
+    bufferevent_enable(server_bev, EV_READ|EV_WRITE);
+    bufferevent_socket_connect_hostname(server_bev, ctx->driver->dnsbase, AF_UNSPEC, servername[0]->bv_val, ctx->driver->config->default_port);
+    bufferevent_setcb(server_bev, NULL, NULL, server_connect_cb, ctx);
+
+    /*
+    // copy over client data, CRLF in request has been skipped, so append that
+    bufferevent_write(server_bev, req->line.bv_val, req->line.bv_len);
+    bufferevent_write(server_bev, CRLF, 2);
+    */
+
+    ctx->server_bev = server_bev;
+    ldap_value_free_len(servername);
 }
 
 static void

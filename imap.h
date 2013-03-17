@@ -18,6 +18,10 @@
 
 #define CRLF "\r\n"
 
+/*FIXME: these should match Cyrus messages */
+#define AUTH_FAILED_MSG "NO Authentication failed"
+#define AUTH_ABORTED_MSG "BAD Authentication aborted"
+
 struct imap_driver;
 struct imap_config;
 struct imap_context;
@@ -47,6 +51,8 @@ struct imap_driver {
     struct evconnlistener *listener;
 
     struct imap_config *config;
+
+    struct module *ldap;
 
     Avlnode *commands;
     SSL_CTX *ssl_ctx;
