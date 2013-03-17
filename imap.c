@@ -12,6 +12,7 @@
 
 static int imap_driver_install(struct bufferevent *, struct imap_driver *);
 
+static void enable_listener(int, void *);
 static void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
 static void conn_readcb(struct bufferevent *, void *);
 static void conn_eventcb(struct bufferevent *, short, void *);
@@ -135,6 +136,7 @@ imap_driver_init(struct module *module, struct event_base *base)
     struct imap_driver *driver = module->priv;
     struct imap_config *config;
     struct imap_handler *handler = handlers;
+    struct module *ldap;
     struct sockaddr_in6 sin;
     int socklen = sizeof(sin);
 
@@ -165,11 +167,10 @@ imap_driver_init(struct module *module, struct event_base *base)
         return 1;
     }
 
-    /* after startup dependency notifications are available, create it in
-     * disabled state setting LEV_OPT_DISABLED and enable after ldap tells us
-     * it's ready */
+    /* we start in disabled state until the LDAP interface is ready */
     driver->listener = evconnlistener_new_bind(base, listen_cb, (void*)driver,
-            LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE, -1, (struct sockaddr *)&sin, socklen);
+            LEV_OPT_REUSEABLE|LEV_OPT_DISABLED|LEV_OPT_CLOSE_ON_FREE,
+            -1, (struct sockaddr *)&sin, socklen);
     /* could also be wise to set an error callback, but what errors do we face
      * on accept()? */
 
@@ -178,7 +179,26 @@ imap_driver_init(struct module *module, struct event_base *base)
         return 1;
     }
 
+    ldap = get_module("ldap");
+    if (!ldap || !ldap->register_event) {
+        fprintf(stderr, "LDAP module not available!\n");
+        return 1;
+    }
+
+    if (ldap->register_event(ldap, MODULE_READY, enable_listener, driver->listener)) {
+        fprintf(stderr, "Regitration with LDAP module failed!\n");
+        return 1;
+    }
+    driver->ldap = ldap;
+
     return 0;
+}
+
+static void
+enable_listener(int flags, void *ctx)
+{
+    struct evconnlistener *listener = ctx;
+    evconnlistener_enable(listener);
 }
 
 static void
