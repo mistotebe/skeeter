@@ -221,14 +221,27 @@ void ldap_reset_connection(struct ldap_driver *driver)
     event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
 }
 
+void ldap_call_handlers(int flag, struct ldap_driver *driver)
+{
+    struct ldap_q_entry *ent;
+    for(ent = driver->ldap_q.tqh_first; ent != NULL; ent = ent->next.tqe_next) {
+        if (!(flag & ent->flag))
+            continue;
+        ent->cb(flag,ent->ctx);
+        if (!(flag & MODULE_PERSIST)) {
+            TAILQ_REMOVE(&driver->ldap_q, ent, next);
+        }
+    }
+}
+
 void ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
 {
-
     struct ldap_driver *driver = ctx;
     /* have we lost the connection? Disable the module temporarily and try to
      * create another, possibly after some time has passed */
     if (events & (BEV_EVENT_ERROR | BEV_EVENT_EOF)) {
         // call the error handlers
+        ldap_call_handlers(MODULE_UNAVAILABLE, ctx);
         // flush the pending requests
         avl_free(driver->pending_requests, request_fail_free);
         ldap_reset_connection(driver);
@@ -290,7 +303,9 @@ void ldap_bind_cb(struct bufferevent *bev, void *ctx)
         if ( msgtype == LDAP_RES_BIND ) {
             errcode = get_ldap_errcode(driver->ld, res);
             if ( errcode == LDAP_SUCCESS ) {
+                fprintf(stderr,"We are binded\n");
                 bufferevent_setcb(bev, ldap_read_cb, NULL, ldap_error_cb, ctx);
+                ldap_call_handlers(MODULE_READY,driver);
                 return;
             } else {
                 fprintf(stderr, "Bind failed: %s\n", ldap_err2string(errcode));
