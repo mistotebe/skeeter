@@ -64,11 +64,17 @@ static int request_cmp(const void *left, const void *right)
 static void request_free(void *req)
 {
     struct request *r = req;
-    // login failed, inform the client
-    r->cb(NULL,r->ctx);
     if(r->msg != NULL)
         ldap_msgfree(r->msg);
     free(req);
+}
+
+static void request_fail_free(void *req)
+{
+    struct request *r = req;
+    // login failed, inform the client
+    r->cb(r->ld,NULL,r->ctx);
+    request_free(r);
 }
 
 void ldap_connect_cb(struct bufferevent *, short, void *);
@@ -105,7 +111,7 @@ void ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
     if (events & (BEV_EVENT_ERROR | BEV_EVENT_EOF)) {
         // call the error handlers
         // flush the pending requests
-        avl_free(driver->pending_requests);
+        avl_free(driver->pending_requests, request_fail_free);
         ldap_reset_connection(driver);
     }
 }
