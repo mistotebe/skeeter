@@ -275,31 +275,45 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx)
     struct request *found;
 
     while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &poll_time, &res )) > 0 ) {
-        // we are interested in search responses only
-        if (msgtype == LDAP_RES_SEARCH_ENTRY || msgtype == LDAP_RES_SEARCH_RESULT) {
-            struct request needle = { .msgid = ldap_msgid(res) };
-            errcode = get_ldap_errcode(driver->ld, res);
-            found = avl_find(driver->pending_requests, &needle, request_cmp);
-            // it is probably too early or too lateto get the result
-            if(found == NULL) {
-                fprintf(stderr, "storing requests into avl tooks long time\n");
-                continue;
-            }
+        struct request needle = { .msgid = ldap_msgid(res) };
+        found = avl_find(driver->pending_requests, &needle, request_cmp);
 
-            if ( msgtype == LDAP_RES_SEARCH_ENTRY ) {
-                // read the result and store it into avl
+        // handle unsolicited message
+        if(needle.msgid == 0) {
+            fprintf(stderr,"LDAP server shutting down\n");
+            ldap_error_cb(bev, BEV_EVENT_EOF, ctx);
+        }
+
+        // it is probably too early or too lateto get the result
+        if(found == NULL) {
+            fprintf(stderr, "Not found appropriate message\n");
+            ldap_msgfree(res);
+            continue;
+        }
+
+        switch (msgtype) {
+            case LDAP_RES_SEARCH_ENTRY:
                 found->msg = res;
-            } else {
-                if (errcode == LDAP_SUCCESS) {
-                    found->cb(driver->ld, found->msg, found->ctx);
-                } else {
+                // continue otherwise the message will be freed
+                continue;
+            case LDAP_RES_SEARCH_RESULT:
+                errcode = get_ldap_errcode(driver->ld, res);
+
+                if (errcode != LDAP_SUCCESS) {
                     fprintf(stderr, "Error during reading results: %s\n", ldap_err2string(errcode));
                     found->cb(driver->ld, NULL, found->ctx);
+                } else {
+                    found->cb(driver->ld, found->msg, found->ctx);
                 }
-                if(found->msg != NULL) free(found->msg);
-                avl_delete(&driver->pending_requests, &needle, request_cmp);
-            }
+
+                avl_delete(&driver->pending_requests, found, request_cmp);
+                // vytvorit request simple free
+                request_free(found);
+                break;
+            default:
+                break;
         }
+        ldap_msgfree(res);
     }
 }
 
