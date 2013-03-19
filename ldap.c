@@ -89,6 +89,18 @@ static void request_fail_free(void *req)
 }
 
 void ldap_connect_cb(struct bufferevent *, short, void *);
+int get_ldap_errcode(LDAP* , LDAPMessage *);
+void ldap_reset_connection(struct ldap_driver *);
+void ldap_error_cb(struct bufferevent *, short, void *);
+void ldap_read_cb(struct bufferevent *, void *);
+void ldap_bind_cb(struct bufferevent *, void *);
+void ldap_connect_cb(struct bufferevent *, short, void *);
+void ldap_driver_connect_cb(evutil_socket_t, short, void *);
+int ldap_register_event(struct module *, int, module_event_cb, void *);
+void ldap_call_handlers(int, struct ldap_driver *);
+//int ldap_driver_init(struct module *, struct event_base *);
+//int ldap_driver_config(struct module *, config_setting_t *);
+char * expand_tokens(char *, char *, char *);
 
 int ldap_driver_init(struct module *module, struct event_base *base)
 {
