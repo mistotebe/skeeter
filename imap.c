@@ -14,7 +14,7 @@
 
 static int imap_driver_install(struct bufferevent *, struct imap_driver *);
 
-static void enable_listener(int, void *);
+static void trigger_listener(int, void *);
 static void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
 static void conn_readcb(struct bufferevent *, void *);
 static void conn_eventcb(struct bufferevent *, short, void *);
@@ -189,20 +189,24 @@ imap_driver_init(struct module *module, struct event_base *base)
         return 1;
     }
 
-    if (ldap->register_event(ldap, MODULE_READY, enable_listener, driver->listener)) {
+    if (ldap->register_event(ldap, MODULE_ANY | MODULE_PERSIST, trigger_listener, driver->listener)) {
         fprintf(stderr, "Regitration with LDAP module failed!\n");
         return 1;
     }
+
     driver->ldap = ldap;
 
     return 0;
 }
 
 static void
-enable_listener(int flags, void *ctx)
+trigger_listener(int flags, void *ctx)
 {
     struct evconnlistener *listener = ctx;
-    evconnlistener_enable(listener);
+    if (flags & MODULE_READY)
+        evconnlistener_enable(listener);
+    else
+        evconnlistener_disable(listener);
 }
 
 static void
