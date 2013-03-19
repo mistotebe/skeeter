@@ -4,6 +4,7 @@
 #include "avl/avl.h"
 #include "ldap.h"
 #include "io_handler.h"
+#include <sys/queue.h>
 #include <lber.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -20,6 +21,7 @@ struct request {
     int msgid;
     ldap_cb cb;
     void *ctx;
+    LDAP *ld;
     LDAPMessage *msg;
 };
 
@@ -38,12 +40,21 @@ static struct ldap_config ldap_config = {
     .reconnect_tout = { 5, 0 },
 };
 
+struct ldap_q_entry {
+    int flag;
+    module_event_cb cb;
+    void *ctx;
+    TAILQ_ENTRY(ldap_q_entry) next;
+};
+
 struct ldap_driver {
     struct event_base *base;
     struct bufferevent *bev;
     LDAP *ld;
     struct ldap_config *config;
     struct event *reconnect_event;
+
+    TAILQ_HEAD(ldap_q_tailhead, ldap_q_entry) ldap_q;
 
     Avlnode *pending_requests;
 };
@@ -182,6 +193,7 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
     driver->config = &ldap_config;
     module->priv = driver;
     module->register_event = ldap_register_event;
+    TAILQ_INIT(&driver->ldap_q);
 
     return 0;
 }
@@ -345,8 +357,18 @@ void ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
     bufferevent_setcb(driver->bev, NULL, NULL, ldap_connect_cb, driver);
 }
 
+int
+ldap_register_event(struct module *module, int flag, module_event_cb cb, void *ctx)
 {
+    struct ldap_q_entry *entry;
+    struct ldap_driver * driver = module->priv;
+    entry = malloc(sizeof(struct ldap_q_entry));
+    if (entry == NULL)
         return 1;
+    entry->flag = flag;
+    entry->cb = cb;
+    entry->ctx = ctx;
+    TAILQ_INSERT_TAIL(&(driver->ldap_q), entry, next);
     return 0;
 }
 
