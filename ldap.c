@@ -217,7 +217,7 @@ int get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
  * many unused arguments
  */
     int result;
-    if ( ldap_parse_result(ld, msg, &result, NULL, NULL, NULL, NULL, 1) != LDAP_SUCCESS ) {
+    if ( ldap_parse_result(ld, msg, &result, NULL, NULL, NULL, NULL, 0) != LDAP_SUCCESS ) {
         fprintf(stderr, "Unable to parse ldap result\n");
         return -1;
     }
