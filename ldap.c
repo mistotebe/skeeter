@@ -490,7 +490,7 @@ int get_user_info(struct module *module, struct user_info *info, ldap_cb cb, voi
     struct ldap_driver *driver = module->priv;
     struct ldap_config *config = driver->config;
 
-    struct request *req = malloc(sizeof (struct request));
+    struct request *req = calloc(1, sizeof (struct request));
     if (req == NULL)
         goto get_user_info_fail;
 
@@ -517,11 +517,12 @@ int get_user_info(struct module *module, struct user_info *info, ldap_cb cb, voi
     req->msgid = msgid;
     req->cb = cb;
     req->ctx = ctx;
-    req->msg = NULL;
+    req->ld = driver->ld;
 
     if(avl_insert(&driver->pending_requests, req, request_cmp, avl_dup_error))
         goto get_user_info_fail;
 
+    free(filter);
     return 0;
 
 get_user_info_fail:
