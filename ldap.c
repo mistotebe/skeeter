@@ -35,14 +35,14 @@ struct ldap_config {
     char *bind_dn;
     char *password;
     char *uri;
-    struct timeval reconnect_tout;
+    struct timeval reconnect_timeout;
 };
 
 static struct ldap_config ldap_config = {
     .bind_dn = "cn=Directory Manager,o=example.com",
     .password = "abcd",
     .uri = DEFAULT_URI,
-    .reconnect_tout = { 5, 0 },
+    .reconnect_timeout = { 5, 0 },
 };
 
 struct ldap_q_entry {
@@ -107,7 +107,8 @@ void ldap_call_handlers(int, struct ldap_driver *);
 //int ldap_driver_config(struct module *, config_setting_t *);
 char * expand_tokens(char *, char *, char *);
 
-int ldap_driver_init(struct module *module, struct event_base *base)
+int
+ldap_driver_init(struct module *module, struct event_base *base)
 {
     /* open connection to the LDAP server and do an ldap_simple_bind_s
      * store the ld to driver */
@@ -127,7 +128,8 @@ int ldap_driver_init(struct module *module, struct event_base *base)
     return 0;
 }
 
-int ldap_driver_config(struct module *module, config_setting_t *conf)
+int
+ldap_driver_config(struct module *module, config_setting_t *conf)
 {
     /* update the config with the appropriate values and register as "ldap" so
      * that "imap" can retrieve the driver */
@@ -179,7 +181,7 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
     setting = config_setting_get_member(conf, "reconnect_timeout");
     if (setting != NULL) {
         tout = config_setting_get_int(setting);
-        if (tout >= 0) ldap_config.reconnect_tout.tv_sec = tout;
+        if (tout >= 0) ldap_config.reconnect_timeout.tv_sec = tout;
     }
 
     driver = calloc(1, sizeof(struct ldap_driver));
@@ -194,7 +196,8 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
     return 0;
 }
 
-int get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
+int
+get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
 {
 /*
  * Simple getter of ldap error code to avoid using original function with
@@ -208,16 +211,18 @@ int get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
     return result;
 }
 
-void ldap_reset_connection(struct ldap_driver *driver)
+void
+ldap_reset_connection(struct ldap_driver *driver)
 {
     // unbind to free the socket
     ldap_unbind(driver->ld);
     bufferevent_free(driver->bev); driver->bev = NULL;
     // wait for some time and try reconnect
-    event_add(driver->reconnect_event, &(driver->config->reconnect_tout));
+    event_add(driver->reconnect_event, &(driver->config->reconnect_timeout));
 }
 
-void ldap_call_handlers(int flag, struct ldap_driver *driver)
+void
+ldap_call_handlers(int flag, struct ldap_driver *driver)
 {
     struct ldap_q_entry *ent;
     for(ent = driver->ldap_q.tqh_first; ent != NULL; ent = ent->next.tqe_next) {
@@ -230,7 +235,8 @@ void ldap_call_handlers(int flag, struct ldap_driver *driver)
     }
 }
 
-void ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
+void
+ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
 {
     struct ldap_driver *driver = ctx;
     /* have we lost the connection? Disable the module temporarily and try to
@@ -244,7 +250,8 @@ void ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
     }
 }
 
-void ldap_read_cb(struct bufferevent *bev, void *ctx)
+void
+ldap_read_cb(struct bufferevent *bev, void *ctx)
 {
     /* try ldap_result and iterate over the results */
 
@@ -267,9 +274,9 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx)
             ldap_error_cb(bev, BEV_EVENT_EOF, ctx);
         }
 
-        // it is probably too early or too lateto get the result
+        // it is probably too early or too late to get the result
         if(found == NULL) {
-            fprintf(stderr, "Not found appropriate message\n");
+            fprintf(stderr, "Got response for non-existent request\n");
             ldap_msgfree(res);
             continue;
         }
@@ -290,7 +297,6 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx)
                 }
 
                 avl_delete(&driver->pending_requests, found, request_cmp);
-                // vytvorit request simple free
                 request_free(found);
                 break;
             default:
@@ -300,7 +306,8 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx)
     }
 }
 
-void ldap_bind_cb(struct bufferevent *bev, void *ctx)
+void
+ldap_bind_cb(struct bufferevent *bev, void *ctx)
 {
     /* try ldap_result and iterate over the results */
     struct ldap_driver *driver = ctx;
@@ -321,10 +328,11 @@ void ldap_bind_cb(struct bufferevent *bev, void *ctx)
                 return;
             }
         } // ignore other than bind_result responses
-    } //otherwise restart bind
+    }
 }
 
-void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
+void
+ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
 {
     struct ldap_driver *driver = ctx;
     struct berval password = {0, NULL};
@@ -350,20 +358,21 @@ void ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
         rc = ldap_sasl_bind(driver->ld, driver->config->bind_dn, LDAP_SASL_SIMPLE, &password, NULL, NULL, &msgid);
         if (rc != LDAP_SUCCESS) {
             fprintf(stderr, "error during bind: %s\n", ldap_err2string(rc));
-            // restart connection after timeout
+            goto ldap_connect_cleanup;
         }
 
         return;
     }
 
-    // otherwise cleanup and restart
+    // otherwise cleanup and reconnect
     ldap_connect_cleanup:
         ldap_reset_connection(driver);
 }
 
 // bufferevent creation and callback setting might be used more times
 // therefore it deserves own function
-void ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
+void
+ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
 {
     struct evdns_base *dnsbase = get_dnsbase();
     struct ldap_driver *driver = ctx;
@@ -395,7 +404,8 @@ ldap_register_event(struct module *module, int flag, module_event_cb cb, void *c
     return 0;
 }
 
-char * expand_tokens(char *pattern, char *username, char *domain)
+char *
+expand_tokens(char *pattern, char *username, char *domain)
 {
  /*
   * Expand user specified search string into usable ldap filter
@@ -492,7 +502,8 @@ char * expand_tokens(char *pattern, char *username, char *domain)
         return NULL;
 }
 
-int get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *ctx)
+int
+get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *ctx)
 {
     int msgid, rc;
     struct ldap_driver *driver = module->priv;
