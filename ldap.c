@@ -93,8 +93,18 @@ static void request_fail_free(void *req)
     request_free(r);
 }
 
-void ldap_connect_cb(struct bufferevent *, short, void *);
-int get_ldap_errcode(LDAP* , LDAPMessage *);
+static void handlers_free(struct ldap_driver *driver)
+{
+    struct ldap_q_entry *ent;
+    while (driver->ldap_q.tqh_first != NULL) {
+        ent = driver->ldap_q.tqh_first;
+        TAILQ_REMOVE(&driver->ldap_q, driver->ldap_q.tqh_first, next);
+        free(ent);
+    }
+}
+
+int get_ldap_errcode(LDAP *, LDAPMessage *);
+void ldap_close_connection(struct ldap_driver *);
 void ldap_reset_connection(struct ldap_driver *);
 void ldap_error_cb(struct bufferevent *, short, void *);
 void ldap_read_cb(struct bufferevent *, void *);
@@ -104,6 +114,7 @@ void ldap_driver_connect_cb(evutil_socket_t, short, void *);
 int ldap_register_event(struct module *, int, module_event_cb, void *);
 void ldap_call_handlers(int, struct ldap_driver *);
 char * expand_tokens(char *, char *, char *);
+void ldap_shutdown(struct module *);
 
 int
 ldap_driver_init(struct module *module, struct event_base *base)
@@ -189,6 +200,7 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
     driver->config = &ldap_config;
     module->priv = driver;
     module->register_event = ldap_register_event;
+    module->shutdown = ldap_shutdown;
     TAILQ_INIT(&driver->ldap_q);
 
     return 0;
@@ -210,11 +222,18 @@ get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
 }
 
 void
-ldap_reset_connection(struct ldap_driver *driver)
+ldap_close_connection(struct ldap_driver *driver)
 {
     // unbind to free the socket
-    ldap_unbind(driver->ld);
+    if (driver->ld != NULL)
+        ldap_unbind(driver->ld);
     bufferevent_free(driver->bev); driver->bev = NULL;
+}
+
+void
+ldap_reset_connection(struct ldap_driver *driver)
+{
+    ldap_close_connection(driver);
     // wait for some time and try reconnect
     event_add(driver->reconnect_event, &(driver->config->reconnect_timeout));
 }
@@ -227,9 +246,9 @@ ldap_call_handlers(int flag, struct ldap_driver *driver)
         if (!(flag & ent->flag))
             continue;
         ent->cb(flag,ent->ctx);
-        if (!(flag & MODULE_PERSIST)) {
+        if (!(flag & MODULE_PERSIST))
             TAILQ_REMOVE(&driver->ldap_q, ent, next);
-        }
+            free(ent);
     }
 }
 
@@ -389,6 +408,7 @@ ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
     bufferevent_socket_connect_hostname(driver->bev, dnsbase, AF_UNSPEC,
                                         conf->data->lud_host, conf->data->lud_port);
     bufferevent_setcb(driver->bev, NULL, NULL, ldap_connect_cb, driver);
+    //TODO: timeout when can not connect to the hostname
 }
 
 int
@@ -552,3 +572,18 @@ get_user_info_fail:
     return 1;
 }
 
+void
+ldap_shutdown(struct module *module)
+{
+    struct ldap_driver *driver = module->priv;
+//    ldap_call_handlers(MODULE_SHUTDOWN, driver);
+    ldap_close_connection(driver);
+    /*
+     *  Use simple request_free with no notifications being sent to client,
+     *  because the IMAP module might be already terminated and thus no message
+     *  could be sent
+     */
+    avl_free(driver->pending_requests, request_free);
+    // clear all ldap handlers
+    handlers_free(driver);
+}
