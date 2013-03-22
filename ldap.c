@@ -103,8 +103,6 @@ void ldap_connect_cb(struct bufferevent *, short, void *);
 void ldap_driver_connect_cb(evutil_socket_t, short, void *);
 int ldap_register_event(struct module *, int, module_event_cb, void *);
 void ldap_call_handlers(int, struct ldap_driver *);
-//int ldap_driver_init(struct module *, struct event_base *);
-//int ldap_driver_config(struct module *, config_setting_t *);
 char * expand_tokens(char *, char *, char *);
 
 int
