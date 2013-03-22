@@ -17,6 +17,11 @@ int ldap_init_fd(ber_socket_t fd, int proto, LDAP_CONST char *url, LDAP **ldp );
 
 #define DEFAULT_URI "ldap://ldap.example.com:389/o=example.com?mailHost?sub"
 
+static struct timeval ldap_no_timeout = {
+    .tv_sec = 0,
+    .tv_usec = 0,
+};
+
 struct request {
     int msgid;
     ldap_cb cb;
@@ -271,10 +276,9 @@ void ldap_read_cb(struct bufferevent *bev, void *ctx)
     struct ldap_driver *driver = ctx;
     LDAPMessage *res;
     int msgtype, errcode;
-    static struct timeval poll_time = {0, 0};
     struct request *found;
 
-    while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &poll_time, &res )) > 0 ) {
+    while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &ldap_no_timeout, &res )) > 0 ) {
         struct request needle = { .msgid = ldap_msgid(res) };
         found = avl_find(driver->pending_requests, &needle, request_cmp);
 
@@ -323,9 +327,8 @@ void ldap_bind_cb(struct bufferevent *bev, void *ctx)
     struct ldap_driver *driver = ctx;
     LDAPMessage *res;
     int msgtype, errcode;
-    static struct timeval poll_time = {0, 0};
 
-    while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &poll_time, &res )) > 0 ) {
+    while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &ldap_no_timeout, &res )) > 0 ) {
         if ( msgtype == LDAP_RES_BIND ) {
             errcode = get_ldap_errcode(driver->ld, res);
             if ( errcode == LDAP_SUCCESS ) {
