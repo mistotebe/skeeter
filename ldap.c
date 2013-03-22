@@ -396,7 +396,7 @@ ldap_register_event(struct module *module, int flag, module_event_cb cb, void *c
 {
     struct ldap_q_entry *entry;
     struct ldap_driver * driver = module->priv;
-    entry = malloc(sizeof(struct ldap_q_entry));
+    entry = calloc(1,sizeof(struct ldap_q_entry));
     if (entry == NULL)
         return 1;
     entry->flag = flag;
