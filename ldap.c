@@ -270,6 +270,8 @@ ldap_read_cb(struct bufferevent *bev, void *ctx)
         if(needle.msgid == 0) {
             fprintf(stderr,"LDAP server shutting down\n");
             ldap_error_cb(bev, BEV_EVENT_EOF, ctx);
+            ldap_msgfree(res);
+            break;
         }
 
         // it is probably too early or too late to get the result
