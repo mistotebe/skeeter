@@ -131,7 +131,7 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
 {
     /* update the config with the appropriate values and register as "ldap" so
      * that "imap" can retrieve the driver */
-    config_setting_t *setting, *value;
+    config_setting_t *setting;
     struct ldap_driver *driver;
     int i,tout;
 
@@ -174,27 +174,6 @@ int ldap_driver_config(struct module *module, config_setting_t *conf)
         const char *val = config_setting_get_string(setting);
         if (val != NULL)
             asprintf(simple_entries[i].addr, "%s", val);
-    }
-
-    setting = config_setting_get_member(conf, "search_attribute");
-    if (setting != NULL) {
-        if (ldap_config.data->lud_attrs != NULL) {
-            for(i=0; i < sizeof(ldap_config.data->lud_attrs)/sizeof(*ldap_config.data->lud_attrs); i++){
-                free(ldap_config.data->lud_attrs[i]);
-            }
-            free(ldap_config.data->lud_attrs);
-        }
-        i = config_setting_length(setting);
-        ldap_config.data->lud_attrs = calloc(i+1,sizeof(char *));
-        if(ldap_config.data->lud_attrs == NULL)
-            return 1;
-        i=0;
-        while((value=config_setting_get_elem(setting,i)) != NULL)
-        {
-            conf_get_string(ldap_config.data->lud_attrs[i],value);
-            i++;
-        }
-        ldap_config.data->lud_attrs[i] = NULL;
     }
 
     setting = config_setting_get_member(conf, "reconnect_timeout");
@@ -533,7 +512,7 @@ int get_user_info(struct module *module, struct user_info *info, ldap_cb cb, voi
     /* send the search */
     rc = ldap_search_ext(driver->ld,config->data->lud_dn,
                          LDAP_SCOPE_SUBTREE, filter,
-                         ldap_config.data->lud_attrs, 0,
+                         info->attrs, 0,
                          NULL, NULL,
                          NULL, 1, // no timeout set and we want only one result
                          &msgid);
