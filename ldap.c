@@ -307,7 +307,6 @@ ldap_read_cb(struct bufferevent *bev, void *ctx)
 
     while ( (msgtype = ldap_result( driver->ld, LDAP_RES_ANY, 0, &ldap_no_timeout, &res )) > 0 ) {
         struct request needle = { .msgid = ldap_msgid(res) };
-        found = avl_find(driver->pending_requests, &needle, request_cmp);
 
         // handle unsolicited message
         if(needle.msgid == 0) {
@@ -317,6 +316,7 @@ ldap_read_cb(struct bufferevent *bev, void *ctx)
             break;
         }
 
+        found = avl_find(driver->pending_requests, &needle, request_cmp);
         // it is probably too early or too late to get the result
         if(found == NULL) {
             fprintf(stderr, "Got response for non-existent request\n");
