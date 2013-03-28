@@ -33,16 +33,16 @@ struct request {
 
 struct ldap_config {
     LDAPURLDesc *data;
-    char *bind_dn;
-    char *password;
     char *uri;
+    char *bind_dn;
+    struct berval password;
     struct filter filter;
     struct timeval reconnect_timeout;
 };
 
-static struct ldap_config ldap_config = {
+static struct ldap_config config_default = {
     .bind_dn = "cn=Directory Manager,o=example.com",
-    .password = "abcd",
+    .password = { 4L, "abcd"},
     .uri = DEFAULT_URI,
     .reconnect_timeout = { 5, 0 },
 };
@@ -144,19 +144,38 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
     /* update the config with the appropriate values and register as "ldap" so
      * that "imap" can retrieve the driver */
     config_setting_t *setting;
+    struct ldap_config *config;
     struct ldap_driver *driver;
-    int i,tout;
+    char *password;
+    int tout;
 
     if (conf == NULL)
         return 1;
 
+    config = malloc(sizeof(struct ldap_config));
+    if (config == NULL)
+        return 1;
+    *config = config_default;
+
+    // entries that should contain only one string
+    struct {
+        char *name;
+        char **addr;
+    } *ptr, simple_entries[] =
+        {
+            config_entry(config->bind_dn, bind_dn),
+            config_entry(password, password),
+//            config_entry(config->data->lud_dn, search_base),
+        };
+    ptr = simple_entries;
+
     // first parse the uri - it should allocate the LDAPURLDesc structure
     setting = config_setting_get_member(conf, "uri");
     if (setting != NULL)
-        conf_get_string(ldap_config.uri, setting);
+        conf_get_string(config->uri, setting);
 
-    if (ldap_is_ldap_url(ldap_config.uri)) {
-        if (ldap_url_parse(ldap_config.uri,&(ldap_config.data))) {
+    if (ldap_is_ldap_url(config->uri)) {
+        if (ldap_url_parse(config->uri,&(config->data))) {
             fprintf(stderr, "Can not parse LDAP URI\n");
             return 1;
         }
@@ -165,27 +184,19 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
         return 1;
     }
 
-    // entries that should contain only one string
-    struct {
-        char *name;
-        char **addr;
-    } simple_entries[] =
-        {
-            config_entry(ldap_config.bind_dn, bind_dn),
-            config_entry(ldap_config.password, password),
-            config_entry(ldap_config.data->lud_dn, search_base),
-        };
-
     // we can not use conf_get_string macro because it is wrongly hanling
     // the pointer to the target variable
-    for (i=0; i < sizeof(simple_entries)/sizeof(*simple_entries); i++) {
-        setting = config_setting_get_member(conf, simple_entries[i].name);
+    for (; ptr->name; ptr++) {
+        setting = config_setting_get_member(conf, ptr->name);
         if (setting == NULL)
             continue;
         const char *val = config_setting_get_string(setting);
+    // TODO: it fails for some config that is stored in the ldap structure (lud_dn for example)
         if (val != NULL)
-            asprintf(simple_entries[i].addr, "%s", val);
+            asprintf(ptr->addr, "%s", val);
     }
+
+    ber_str2bv(password, 0, 0, &config->password);
 
     // filter is mandatory
     setting = config_setting_get_member(conf, "filter");
@@ -193,7 +204,7 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
         return 1;
     const char *val = config_setting_get_string(setting);
     if (val) {
-        if (filter_create(&ldap_config.filter, val))
+        if (filter_create(&config->filter, val))
             return 1;
     } else {
         return 1;
@@ -202,14 +213,14 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
     setting = config_setting_get_member(conf, "reconnect_timeout");
     if (setting != NULL) {
         tout = config_setting_get_int(setting);
-        if (tout >= 0) ldap_config.reconnect_timeout.tv_sec = tout;
+        if (tout >= 0) config->reconnect_timeout.tv_sec = tout;
     }
 
     driver = calloc(1, sizeof(struct ldap_driver));
     if(driver == NULL)
         return 1;
 
-    driver->config = &ldap_config;
+    driver->config = config;
     module->priv = driver;
     module->register_event = ldap_register_event;
     module->shutdown = ldap_shutdown;
@@ -368,27 +379,29 @@ void
 ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
 {
     struct ldap_driver *driver = ctx;
-    struct berval password = {0, NULL};
     int rc, msgid;
     Sockbuf *sb;
 
     if (events & BEV_EVENT_CONNECTED) {
         if (ldap_init_fd(bufferevent_getfd(bev), LDAP_PROTO_EXT, driver->config->uri, &(driver->ld)))
             goto ldap_connect_cleanup;
+
         ldap_get_option(driver->ld, LDAP_OPT_SOCKBUF, &sb);
         if (sb == NULL) {
             fprintf(stderr, "Could not retrieve sockbuf\n");
             goto ldap_connect_cleanup;
         }
+
         if (ber_sockbuf_add_io(sb, &ber_sockbuf_io_libevent, LBER_SBIOD_LEVEL_PROVIDER, bev)) {
             fprintf(stderr, "Could not install sockbuf handler\n");
             goto ldap_connect_cleanup;
         }
         errno = 0;
+
         bufferevent_setcb(bev, ldap_bind_cb, NULL, ldap_error_cb, driver);
-        password.bv_val = ber_strdup(driver->config->password);
-        password.bv_len = strlen(password.bv_val);
-        rc = ldap_sasl_bind(driver->ld, driver->config->bind_dn, LDAP_SASL_SIMPLE, &password, NULL, NULL, &msgid);
+        rc = ldap_sasl_bind(driver->ld, driver->config->bind_dn,
+                            LDAP_SASL_SIMPLE, &driver->config->password,
+                            NULL, NULL, &msgid);
         if (rc != LDAP_SUCCESS) {
             fprintf(stderr, "error during bind: %s\n", ldap_err2string(rc));
             goto ldap_connect_cleanup;
