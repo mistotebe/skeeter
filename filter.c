@@ -7,6 +7,10 @@
 #include <assert.h>
 #include <ldap.h>
 
+#define COPY_TEXT_BER(dst,src) \
+    memcpy((dst), (src)->bv_val, (src)->bv_len); \
+    (dst) = (dst) + (src)->bv_len;
+
 int
 filter_create(struct filter *filter, const char *pattern)
 {
@@ -88,13 +92,6 @@ filter_create(struct filter *filter, const char *pattern)
     return 0;
 }
 
-static char *
-copy_text_ber (char *dst, struct berval *src)
-{
-    memcpy(dst,src->bv_val,src->bv_len);
-    return (dst+src->bv_len);
-}
-
 char *
 filter_get(struct filter *filter, struct user_info *info)
 {
@@ -124,18 +121,18 @@ filter_get(struct filter *filter, struct user_info *info)
     STAILQ_FOREACH(item, &filter->body, next) {
         switch(item->token_type) {
             case USER:
-                ptr = copy_text_ber(ptr,&esc_username);
+                COPY_TEXT_BER(ptr,&esc_username);
                 break;
             case DOMAIN:
-                ptr = copy_text_ber(ptr,&esc_domainname);
+                COPY_TEXT_BER(ptr,&esc_domainname);
                 break;
             case ADDR:
-                ptr = copy_text_ber(ptr,&esc_username);
+                COPY_TEXT_BER(ptr,&esc_username);
                 *ptr = '@'; ptr++;
-                ptr = copy_text_ber(ptr,&esc_domainname);
+                COPY_TEXT_BER(ptr,&esc_domainname);
                 break;
             case LITERAL:
-                ptr = copy_text_ber(ptr,item->text);
+                COPY_TEXT_BER(ptr,item->text);
                 break;
             default:
                 // this should never happen
