@@ -132,8 +132,8 @@ ldap_driver_init(struct module *module, struct event_base *base)
         return 1;
     }
 
-    // we call directly the callback, no need putting the event into loop
-    ldap_driver_connect_cb(-1,0,driver);
+    // activate the event immediately after starting
+    event_active(driver->reconnect_event, EV_TIMEOUT, 1);
 
     return 0;
 }
@@ -425,7 +425,7 @@ ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
     struct ldap_config *conf = driver->config;
 
     if (driver->bev != NULL) {
-        bufferevent_free(driver->bev); driver->bev = NULL;
+        bufferevent_free(driver->bev);
     }
 
     driver->bev = bufferevent_socket_new(driver->base, fd, BEV_OPT_CLOSE_ON_FREE);
