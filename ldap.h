@@ -2,6 +2,7 @@
 #define _SKEETER_LDAP_H
 
 #include <ldap.h>
+#include <lber.h>
 #include "config.h"
 #include "module.h"
 
@@ -10,7 +11,7 @@ typedef void (*ldap_cb)(LDAP *, LDAPMessage *, void *);
 extern struct module ldap_module;
 
 struct user_info {
-    char *username, *domain;
+    struct berval username, domain;
     char **attrs;
 };
 

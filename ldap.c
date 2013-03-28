@@ -4,6 +4,7 @@
 #include "avl/avl.h"
 #include "ldap.h"
 #include "io_handler.h"
+#include "filter.h"
 #include <sys/queue.h>
 #include <lber.h>
 #include <errno.h>
@@ -35,6 +36,7 @@ struct ldap_config {
     char *bind_dn;
     char *password;
     char *uri;
+    struct filter filter;
     struct timeval reconnect_timeout;
 };
 
@@ -113,7 +115,6 @@ void ldap_connect_cb(struct bufferevent *, short, void *);
 void ldap_driver_connect_cb(evutil_socket_t, short, void *);
 int ldap_register_event(struct module *, int, module_event_cb, void *);
 void ldap_call_handlers(int, struct ldap_driver *);
-char * expand_tokens(char *, char *, char *);
 void ldap_shutdown(struct module *);
 
 int
@@ -173,7 +174,6 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
             config_entry(ldap_config.bind_dn, bind_dn),
             config_entry(ldap_config.password, password),
             config_entry(ldap_config.data->lud_dn, search_base),
-            config_entry(ldap_config.data->lud_filter, filter),
         };
 
     // we can not use conf_get_string macro because it is wrongly hanling
@@ -185,6 +185,18 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
         const char *val = config_setting_get_string(setting);
         if (val != NULL)
             asprintf(simple_entries[i].addr, "%s", val);
+    }
+
+    // filter is mandatory
+    setting = config_setting_get_member(conf, "filter");
+    if (setting == NULL)
+        return 1;
+    const char *val = config_setting_get_string(setting);
+    if (val) {
+        if (filter_create(&ldap_config.filter, val))
+            return 1;
+    } else {
+        return 1;
     }
 
     setting = config_setting_get_member(conf, "reconnect_timeout");
@@ -426,104 +438,6 @@ ldap_register_event(struct module *module, int flag, module_event_cb cb, void *c
     return 0;
 }
 
-char *
-expand_tokens(char *pattern, char *username, char *domain)
-{
- /*
-  * Expand user specified search string into usable ldap filter
-  * %% = %
-  * %u = username
-  * %U = username@domain
-  * %d = domain
-  * TODO: escape some characters "* ( ) \ \0"
-  */
-    char *buffer, *buf_ptr, *orig, *orig_end, *token;
-    int username_len, domain_len, total;
-
-    total = strlen(pattern);
-    username_len = strlen(username);
-    domain_len = strlen(domain);
-
-    orig = pattern;
-    orig_end = pattern + total;
-
-    for(; *orig; orig++) {
-        if( *orig == '%' ) {
-            switch(*(orig+1)) {
-                // two '%' reduces into one
-                case '%':
-                    total--;
-                    break;
-                case 'u':
-                    total += username_len - 2;
-                    break;
-                case 'U':
-                    // full address should contain additionaly an '@'
-                    total += username_len + domain_len - 1;
-                    break;
-                case 'd':
-                    total += domain_len - 2;
-                    break;
-                default:
-                    fprintf(stderr,"Unsupported token\n");
-                    break;
-            }
-        }
-    }
-
-    buffer = malloc( (total + 1) * sizeof(char));
-    if (buffer == NULL) {
-        fprintf(stderr, "not enough memory\n");
-        goto expand_tokens_cleanup;
-    }
-    memset(buffer,'\0', total+1);
-    buf_ptr = buffer;
-    orig = pattern;
-
-    while ( (token=strchr(orig,'%')) != NULL ) {
-        if (token > orig) {
-            memcpy(buf_ptr, orig, token-orig);
-            buf_ptr += token-orig;
-        }
-
-        if (token+1 > orig_end) {
-            fprintf(stderr,"Boundary broken\n");
-            goto expand_tokens_cleanup;
-        }
-
-        switch( *(token+1) ){
-            case '%':
-                *buf_ptr = *token;
-                break;
-            case 'u':
-                memcpy(buf_ptr, username, username_len); buf_ptr += username_len;
-                break;
-            case 'U':
-                memcpy(buf_ptr, username, username_len); buf_ptr += username_len;
-                *buf_ptr++ = '@';
-                memcpy(buf_ptr, domain, domain_len); buf_ptr += domain_len;
-                break;
-            case 'd':
-                memcpy(buf_ptr, domain, domain_len); buf_ptr += domain_len;
-                break;
-            default:
-                fprintf(stderr,"Malformed filter\n");
-                goto expand_tokens_cleanup;
-        }
-
-        orig = token + 2;
-    }
-
-    if (orig < orig_end)
-        memcpy(buf_ptr,orig,orig_end-orig);
-
-    return buffer;
-
-    expand_tokens_cleanup:
-        free(buffer);
-        return NULL;
-}
-
 int
 get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *ctx)
 {
@@ -536,7 +450,7 @@ get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *c
         goto get_user_info_fail;
 
     /* construct the search filter */
-    char *filter = expand_tokens(config->data->lud_filter, info->username, "");
+    char *filter = filter_get(&config->filter, info);
     if(filter == NULL) {
         fprintf(stderr, "Failed to construct filter\n");
         goto get_user_info_fail;
@@ -567,8 +481,8 @@ get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *c
     return 0;
 
 get_user_info_fail:
-    if(req != NULL) free(req);
-    if(filter != NULL) free(filter);
+    free(req);
+    free(filter);
     return 1;
 }
 

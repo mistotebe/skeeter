@@ -410,7 +410,7 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
     struct user_info user_info = {};
     char *attrs[2] = { "mailhost", NULL };
     char *p;
-    ssize_t len;
+    ssize_t len, len_domain;
     int rc = IMAP_DONE;
 
     output = bufferevent_get_output(client_bev);
@@ -427,28 +427,29 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
         return IMAP_OK;
     }
 
-    len = p - req->arguments.bv_val;
-    user_info.username = malloc(len + 1);
-    memcpy(user_info.username, req->arguments.bv_val, len);
-    user_info.username[len] = '\0';
+    len = p - req->arguments.bv_val; // length of whole username@login
 
-    p = memchr(user_info.username, '@', len);
-    if (p) {
-        // skip the @ sign
-        *p = '\0';
-        user_info.domain = p + 1;
-    } else {
+    p = memchr(req->arguments.bv_val, '@', len);
+
+    len_domain = (p) ? len - (p - req->arguments.bv_val) : 0;
+
+    // if there might be a domain name
+    if (p)
+        ber_str2bv(req->arguments.bv_val, p - req->arguments.bv_val, 0, &(user_info.username));
+    else
+        ber_str2bv(req->arguments.bv_val, len, 0, &(user_info.username));
+
+    if (len_domain)
+        ber_str2bv(p+1, 0, 0, &(user_info.domain));
+    else
         // use a default domain
-        user_info.domain = ctx->driver->config->default_host;
-    }
+        ber_str2bv(ctx->driver->config->default_host, 0, 0, &(user_info.domain));
 
     user_info.attrs = attrs;
     if (get_user_info(ctx->driver->ldap, &user_info, search_cb, ctx)) {
         evbuffer_add_printf(output, "%s NO Internal server error", req->tag.bv_val);
         rc = IMAP_SHUTDOWN;
     }
-
-    free(user_info.username);
 
     /*
     server_bev = bufferevent_socket_new(ctx->driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
