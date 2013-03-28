@@ -461,12 +461,13 @@ get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *c
 
     struct request *req = calloc(1, sizeof (struct request));
     if (req == NULL)
-        goto get_user_info_fail;
+        return 1;
 
     /* construct the search filter */
     char *filter = filter_get(&config->filter, info);
     if(filter == NULL) {
         fprintf(stderr, "Failed to construct filter\n");
+        rc = 1;
         goto get_user_info_fail;
     }
 
@@ -488,16 +489,12 @@ get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *c
     req->ctx = ctx;
     req->ld = driver->ld;
 
-    if(avl_insert(&driver->pending_requests, req, request_cmp, avl_dup_error))
-        goto get_user_info_fail;
-
-    free(filter);
-    return 0;
+    rc = avl_insert(&driver->pending_requests, req, request_cmp, avl_dup_error);
 
 get_user_info_fail:
-    free(req);
+    if (rc) free(req);
     free(filter);
-    return 1;
+    return rc;
 }
 
 void
