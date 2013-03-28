@@ -265,13 +265,14 @@ void
 ldap_call_handlers(int flag, struct ldap_driver *driver)
 {
     struct ldap_q_entry *ent;
-    for(ent = driver->ldap_q.tqh_first; ent != NULL; ent = ent->next.tqe_next) {
+    TAILQ_FOREACH(ent, &driver->ldap_q, next) {
         if (!(flag & ent->flag))
             continue;
-        ent->cb(flag,ent->ctx);
-        if (!(flag & MODULE_PERSIST))
+        ent->cb(flag, ent->ctx);
+        if (!(flag & MODULE_PERSIST)) {
             TAILQ_REMOVE(&driver->ldap_q, ent, next);
             free(ent);
+        }
     }
 }
 
@@ -440,14 +441,14 @@ int
 ldap_register_event(struct module *module, int flag, module_event_cb cb, void *ctx)
 {
     struct ldap_q_entry *entry;
-    struct ldap_driver * driver = module->priv;
+    struct ldap_driver *driver = module->priv;
     entry = calloc(1,sizeof(struct ldap_q_entry));
     if (entry == NULL)
         return 1;
     entry->flag = flag;
     entry->cb = cb;
     entry->ctx = ctx;
-    TAILQ_INSERT_TAIL(&(driver->ldap_q), entry, next);
+    TAILQ_INSERT_TAIL(&driver->ldap_q, entry, next);
     return 0;
 }
 
