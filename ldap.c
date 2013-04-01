@@ -147,6 +147,7 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
     config_setting_t *setting;
     struct ldap_config *config;
     struct ldap_driver *driver;
+    const char *val;
     char *password;
     int tout;
 
@@ -204,11 +205,9 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
     setting = config_setting_get_member(conf, "filter");
     if (setting == NULL)
         return 1;
-    const char *val = config_setting_get_string(setting);
-    if (val) {
-        if (filter_create(&config->filter, val))
-            return 1;
-    } else {
+
+    val = config_setting_get_string(setting);
+    if (!val || filter_create(&config->filter, val)) {
         return 1;
     }
 
