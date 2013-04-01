@@ -409,42 +409,41 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
     struct evbuffer *output;
     struct user_info user_info = {};
     char *attrs[2] = { "mailhost", NULL };
-    char *p;
+    char *p, *arg;
     ssize_t len, len_domain;
     int rc = IMAP_DONE;
 
     output = bufferevent_get_output(client_bev);
-    p = req->arguments.bv_val;
+    arg = req->arguments.bv_val;
 
     // temporarily until we have a way of handling literals
-    if (*p == '{' || *p == '"') {
+    if (*arg == '{' || *arg == '"') {
         evbuffer_add_printf(output, "%s BAD Sorry, I don't handle literals yet" CRLF, req->tag.bv_val);
         return IMAP_OK;
     }
 
-    p = strchr(req->arguments.bv_val, ' ');
+    p = strchr(arg, ' ');
     if (!p) {
         evbuffer_add_printf(output, "%s NO Invalid command" CRLF, req->tag.bv_val);
         return IMAP_OK;
     }
 
-    len = p - req->arguments.bv_val; // length of whole username@login
+    len = p - arg; // length of whole "username@domain"
 
-    p = memchr(req->arguments.bv_val, '@', len);
+    p = user_info.username.bv_val = malloc(len + 1);
+    memcpy(p, arg, len);
+    p[len] = '\0';
 
-    len_domain = (p) ? len - (p - req->arguments.bv_val) : 0;
-
-    // if there might be a domain name
-    if (p)
-        ber_str2bv(req->arguments.bv_val, p - req->arguments.bv_val, 0, &(user_info.username));
-    else
-        ber_str2bv(req->arguments.bv_val, len, 0, &(user_info.username));
-
-    if (len_domain)
-        ber_str2bv(p+1, 0, 0, &(user_info.domain));
-    else
+    p = memchr(user_info.username.bv_val, '@', len);
+    if (p) {
+        len = p - user_info.username.bv_val;
+        p++;
+    } else {
         // use a default domain
-        ber_str2bv(ctx->driver->config->default_host, 0, 0, &(user_info.domain));
+        p = ctx->driver->config->default_host;
+    }
+    user_info.username.bv_len = len;
+    ber_str2bv(p, 0, 0, &(user_info.domain));
 
     user_info.attrs = attrs;
     if (get_user_info(ctx->driver->ldap, &user_info, search_cb, ctx)) {
