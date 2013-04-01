@@ -27,6 +27,6 @@ struct filter {
 
 int filter_create(struct filter *, const char *);
 char *filter_get(struct filter *, struct user_info *);
-void clear_filter(struct filter *);
+void filter_free(struct filter *);
 
 #endif

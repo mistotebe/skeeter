@@ -146,7 +146,7 @@ filter_get_done:
 }
 
 void
-clear_filter(struct filter *filter)
+filter_free(struct filter *filter)
 {
     struct filterhead *head = &filter->body;
     struct filter_part *to_remove;
