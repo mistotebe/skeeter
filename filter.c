@@ -74,7 +74,8 @@ filter_create(struct filter *filter, const char *pattern)
                 return 1;
         }
         STAILQ_INSERT_TAIL(head, entry, next);
-        filter->occurrence[entry->token_type] += 1;
+        if (entry->token_type != LITERAL)
+            filter->occurrence[entry->token_type] += 1;
 
         ptr++;
         prev = ptr;
