@@ -398,8 +398,11 @@ ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
     Sockbuf *sb;
 
     if (events & BEV_EVENT_CONNECTED) {
+        int ldap_version = LDAP_VERSION3;
+
         if (ldap_init_fd(bufferevent_getfd(bev), LDAP_PROTO_EXT, driver->config->uri, &(driver->ld)))
             goto ldap_connect_cleanup;
+        ldap_set_option(driver->ld, LDAP_OPT_PROTOCOL_VERSION, &ldap_version);
 
         ldap_get_option(driver->ld, LDAP_OPT_SOCKBUF, &sb);
         if (sb == NULL) {
