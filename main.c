@@ -51,6 +51,7 @@ int main(int argc, char** argv)
     /* run */
     event_base_dispatch(base);
 
+    event_free(signal_event);
     for (p = modules; *p; p++) {
         struct module *module = *p;
         if (module->destroy)
