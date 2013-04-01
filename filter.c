@@ -151,9 +151,9 @@ clear_filter(struct filter *filter)
     struct filterhead *head = &filter->body;
     struct filter_part *to_remove;
     while (!STAILQ_EMPTY(head)) {
-        to_remove = head->stqh_first;
+        to_remove = STAILQ_FIRST(head);
         STAILQ_REMOVE_HEAD(head, next);
-        // must free the element manually, STAILQ_REMOVE handles only pointers
+        // REMOVE_HEAD only unlinked the element
         if (to_remove->token_type == LITERAL)
             ber_bvfree(to_remove->text);
         free(to_remove);

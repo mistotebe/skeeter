@@ -98,8 +98,8 @@ static void request_fail_free(void *req)
 static void handlers_free(struct ldap_driver *driver)
 {
     struct ldap_q_entry *ent;
-    while (driver->ldap_q.tqh_first != NULL) {
-        ent = driver->ldap_q.tqh_first;
+    while (!TAILQ_EMPTY(&driver->ldap_q)) {
+        ent = TAILQ_FIRST(&driver->ldap_q);
         TAILQ_REMOVE(&driver->ldap_q, driver->ldap_q.tqh_first, next);
         free(ent);
     }
@@ -264,11 +264,16 @@ ldap_reset_connection(struct ldap_driver *driver)
 void
 ldap_call_handlers(int flag, struct ldap_driver *driver)
 {
-    struct ldap_q_entry *ent;
-    TAILQ_FOREACH(ent, &driver->ldap_q, next) {
+    struct ldap_q_entry *ent, *next;
+    for (ent = TAILQ_FIRST(&driver->ldap_q); ent; ent = next) {
+        /* We might be freeing ent */
+        next = TAILQ_NEXT(ent, next);
+
         if (!(flag & ent->flag))
             continue;
+
         ent->cb(flag, ent->ctx);
+
         if (!(flag & MODULE_PERSIST)) {
             TAILQ_REMOVE(&driver->ldap_q, ent, next);
             free(ent);
