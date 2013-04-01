@@ -46,7 +46,7 @@ filter_create(struct filter *filter, const char *pattern)
 
         ptr++; // we are interested in the following symbol
 
-        // '%' character is not allowd at the last position
+        // '%' character is not allowed at the last position
         if (ptr >= end)
             return 1;
 
@@ -74,7 +74,7 @@ filter_create(struct filter *filter, const char *pattern)
                 return 1;
         }
         STAILQ_INSERT_TAIL(head, entry, next);
-        filter->occurence[entry->token_type] += 1;
+        filter->occurrence[entry->token_type] += 1;
 
         ptr++;
         prev = ptr;
@@ -107,9 +107,9 @@ filter_get(struct filter *filter, struct user_info *info)
     addr_len = esc_username.bv_len + 1 + esc_domainname.bv_len;
 
     total = filter->total_len;
-    total += esc_username.bv_len * filter->occurence[USER];
-    total += esc_domainname.bv_len * filter->occurence[DOMAIN];
-    total += addr_len * filter->occurence[ADDR];
+    total += esc_username.bv_len * filter->occurrence[USER];
+    total += esc_domainname.bv_len * filter->occurrence[DOMAIN];
+    total += addr_len * filter->occurrence[ADDR];
     total++; // remember trailing '\0'
 
     result = calloc(total, sizeof(char));

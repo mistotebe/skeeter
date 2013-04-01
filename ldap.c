@@ -184,7 +184,7 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
         return 1;
     }
 
-    // we can not use conf_get_string macro because it is wrongly hanling
+    // we can not use conf_get_string macro because it is wrongly handling
     // the pointer to the target variable
     for (; ptr->name; ptr++) {
         setting = config_setting_get_member(conf, ptr->name);

@@ -22,7 +22,7 @@ struct filter_part {
 struct filter {
     STAILQ_HEAD(filterhead, filter_part) body;
     int total_len;
-    int occurence[LITERAL];
+    int occurrence[LITERAL];
 };
 
 int filter_create(struct filter *, const char *);
