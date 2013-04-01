@@ -82,7 +82,7 @@ static int request_cmp(const void *left, const void *right)
 static void request_free(void *req)
 {
     struct request *r = req;
-    if(r->msg != NULL)
+    if (r->msg != NULL)
         ldap_msgfree(r->msg);
     free(req);
 }
@@ -217,7 +217,7 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
     }
 
     driver = calloc(1, sizeof(struct ldap_driver));
-    if(driver == NULL)
+    if (driver == NULL)
         return 1;
 
     driver->config = config;
@@ -309,7 +309,7 @@ ldap_read_cb(struct bufferevent *bev, void *ctx)
         struct request needle = { .msgid = ldap_msgid(res) };
 
         // handle unsolicited message
-        if(needle.msgid == 0) {
+        if (needle.msgid == 0) {
             fprintf(stderr,"LDAP server shutting down\n");
             ldap_error_cb(bev, BEV_EVENT_EOF, ctx);
             ldap_msgfree(res);
@@ -318,7 +318,7 @@ ldap_read_cb(struct bufferevent *bev, void *ctx)
 
         found = avl_find(driver->pending_requests, &needle, request_cmp);
         // it is probably too early or too late to get the result
-        if(found == NULL) {
+        if (found == NULL) {
             fprintf(stderr, "Got response for non-existent request\n");
             ldap_msgfree(res);
             continue;
@@ -412,8 +412,8 @@ ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
     }
 
     // otherwise cleanup and reconnect
-    ldap_connect_cleanup:
-        ldap_reset_connection(driver);
+ldap_connect_cleanup:
+    ldap_reset_connection(driver);
 }
 
 // bufferevent creation and callback setting might be used more times
@@ -465,21 +465,21 @@ get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *c
 
     /* construct the search filter */
     char *filter = filter_get(&config->filter, info);
-    if(filter == NULL) {
+    if (filter == NULL) {
         fprintf(stderr, "Failed to construct filter\n");
         rc = 1;
         goto get_user_info_fail;
     }
 
     /* send the search */
-    rc = ldap_search_ext(driver->ld,config->data->lud_dn,
+    rc = ldap_search_ext(driver->ld, config->data->lud_dn,
                          LDAP_SCOPE_SUBTREE, filter,
                          info->attrs, 0,
                          NULL, NULL,
                          NULL, 1, // no timeout set and we want only one result
                          &msgid);
 
-   if(rc != LDAP_SUCCESS) {
+    if (rc != LDAP_SUCCESS) {
         fprintf(stderr,"ldap_search failed for filter '%s' with error '%s'\n",filter,ldap_err2string(rc));
         goto get_user_info_fail;
     }
