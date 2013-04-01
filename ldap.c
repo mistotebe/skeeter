@@ -8,6 +8,7 @@
 #include <sys/queue.h>
 #include <lber.h>
 #include <errno.h>
+#include <assert.h>
 #include <stdlib.h>
 
 #define config_entry(obj, name) { #name, &(obj) }
@@ -248,10 +249,17 @@ get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
 void
 ldap_close_connection(struct ldap_driver *driver)
 {
-    // unbind to free the socket
-    if (driver->ld != NULL)
-        ldap_unbind(driver->ld);
-    bufferevent_free(driver->bev); driver->bev = NULL;
+    if (driver->ld != NULL) {
+        ldap_unbind_ext(driver->ld, NULL, NULL);
+        driver->ld = NULL;
+
+        /* driver->bev is freed by the sockbuf automatically after all pending
+         * data has been sent */
+    } else if (driver->bev) {
+        /* the connection failed, no sockbuf owns this bufferevent yet */
+        bufferevent_free(driver->bev);
+    }
+    driver->bev = NULL;
 }
 
 void
@@ -431,9 +439,8 @@ ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
     struct ldap_driver *driver = ctx;
     struct ldap_config *conf = driver->config;
 
-    if (driver->bev != NULL) {
-        bufferevent_free(driver->bev);
-    }
+    /* we must have disowned it in ldap_close_connection */
+    assert(driver->bev == NULL);
 
     driver->bev = bufferevent_socket_new(driver->base, fd, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(driver->bev, EV_READ|EV_WRITE);
