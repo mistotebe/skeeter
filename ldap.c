@@ -166,6 +166,7 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
             config_entry(config->bind_dn, bind_dn),
             config_entry(password, password),
 //            config_entry(config->data->lud_dn, search_base),
+            { NULL }
         };
     ptr = simple_entries;
 
