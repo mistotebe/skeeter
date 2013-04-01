@@ -471,7 +471,7 @@ ldap_register_event(struct module *module, int flag, module_event_cb cb, void *c
 int
 get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *ctx)
 {
-    int msgid, rc;
+    int rc;
     struct ldap_driver *driver = module->priv;
     struct ldap_config *config = driver->config;
 
@@ -489,18 +489,18 @@ get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *c
 
     /* send the search */
     rc = ldap_search_ext(driver->ld, config->data->lud_dn,
-                         LDAP_SCOPE_SUBTREE, filter,
+                         config->data->lud_scope, filter,
                          info->attrs, 0,
                          NULL, NULL,
-                         NULL, 1, // no timeout set and we want only one result
-                         &msgid);
+                         NULL, /* timeout here affects just the timelimit part of the search */
+                         1, /* we want only one result */
+                         &req->msgid);
 
     if (rc != LDAP_SUCCESS) {
         fprintf(stderr,"ldap_search failed for filter '%s' with error '%s'\n",filter,ldap_err2string(rc));
         goto get_user_info_fail;
     }
 
-    req->msgid = msgid;
     req->cb = cb;
     req->ctx = ctx;
     req->ld = driver->ld;
