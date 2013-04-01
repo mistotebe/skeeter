@@ -14,30 +14,27 @@
 int
 filter_create(struct filter *filter, const char *pattern)
 {
-    char *ptr, *prev, *end;
     struct filter_part *entry;
     struct filterhead *head = &filter->body;
-
+    const char *ptr, *prev, *end;
+    BerElement *ber;
     int len = strlen(pattern);
-    filter->total_len = len;
-    end = pattern + len;
-
-    int i;
-    for(i=0;i<=LITERAL;filter->occurence[i++]=0)
 
     STAILQ_INIT(head);
 
-    ptr = pattern;
+    filter->total_len = len;
+    end = pattern + len;
+
     prev = pattern;
-    while ( *(ptr=strchrnul(ptr, '%')) != '\0' )
+    while ( *(ptr=strchrnul(prev, '%')) != '\0' )
     {
         filter->total_len -= 2;
         if (prev != ptr) {
             entry = malloc(sizeof(struct filter_part));
             if (entry == NULL) return 1;
 
-            // allocate new berval structure and copy the string, otherwise
-            // we will lose the data when configuration parsing is done
+            /* the original string comes from config and will be freed -> we
+             * need to dup it */
             entry->text = ber_str2bv(prev, ptr - prev, 1, NULL);
             entry->token_type = LITERAL;
 
@@ -84,8 +81,10 @@ filter_create(struct filter *filter, const char *pattern)
     if (prev < ptr) {
         entry = malloc(sizeof(struct filter_part));
         if (entry == NULL) return 1;
+
         entry->text = ber_str2bv(prev, ptr - prev, 1, NULL);
         entry->token_type = LITERAL;
+
         STAILQ_INSERT_TAIL(head, entry, next);
     }
 
