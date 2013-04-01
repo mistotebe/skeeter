@@ -9,7 +9,7 @@
 
 #define COPY_TEXT_BER(dst,src) \
     memcpy((dst), (src)->bv_val, (src)->bv_len); \
-    (dst) = (dst) + (src)->bv_len;
+    (dst) += (src)->bv_len;
 
 int
 filter_create(struct filter *filter, const char *pattern)
