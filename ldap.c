@@ -115,7 +115,7 @@ void ldap_bind_cb(struct bufferevent *, void *);
 void ldap_connect_cb(struct bufferevent *, short, void *);
 void ldap_driver_connect_cb(evutil_socket_t, short, void *);
 int ldap_register_event(struct module *, int, module_event_cb, void *);
-void ldap_call_handlers(int, struct ldap_driver *);
+void ldap_call_handlers(struct ldap_driver *, int);
 void ldap_shutdown(struct module *);
 
 int
@@ -271,7 +271,7 @@ ldap_reset_connection(struct ldap_driver *driver)
 }
 
 void
-ldap_call_handlers(int flag, struct ldap_driver *driver)
+ldap_call_handlers(struct ldap_driver *driver, int flag)
 {
     struct ldap_q_entry *ent, *next;
     for (ent = TAILQ_FIRST(&driver->ldap_q); ent; ent = next) {
@@ -298,7 +298,7 @@ ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
      * create another, possibly after some time has passed */
     if (events & (BEV_EVENT_ERROR | BEV_EVENT_EOF)) {
         // call the error handlers
-        ldap_call_handlers(MODULE_UNAVAILABLE, ctx);
+        ldap_call_handlers(driver, MODULE_UNAVAILABLE);
         // flush the pending requests
         avl_free(driver->pending_requests, request_fail_free);
         ldap_reset_connection(driver);
@@ -380,7 +380,7 @@ ldap_bind_cb(struct bufferevent *bev, void *ctx)
             if ( errcode == LDAP_SUCCESS ) {
                 fprintf(stderr,"We are binded\n");
                 bufferevent_setcb(bev, ldap_read_cb, NULL, ldap_error_cb, ctx);
-                ldap_call_handlers(MODULE_READY,driver);
+                ldap_call_handlers(driver, MODULE_READY);
             } else {
                 fprintf(stderr, "Bind failed: %s\n", ldap_err2string(errcode));
                 ldap_reset_connection(driver);
@@ -514,7 +514,7 @@ void
 ldap_shutdown(struct module *module)
 {
     struct ldap_driver *driver = module->priv;
-//    ldap_call_handlers(MODULE_SHUTDOWN, driver);
+//    ldap_call_handlers(driver, MODULE_SHUTDOWN);
     ldap_close_connection(driver);
     /*
      *  Use simple request_free with no notifications being sent to client,
