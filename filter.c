@@ -25,6 +25,16 @@ filter_create(struct filter *filter, const char *pattern)
     filter->total_len = len;
     end = pattern + len;
 
+    /* test input filter validity */
+    ber = ber_alloc_t(0);
+    if (!ber)
+        return 1;
+    if (ldap_put_vrFilter(ber, pattern)) {
+        ber_free(ber, 1);
+        return 1;
+    }
+    ber_free(ber, 1);
+
     prev = pattern;
     while ( *(ptr=strchrnul(prev, '%')) != '\0' )
     {
