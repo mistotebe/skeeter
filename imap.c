@@ -414,16 +414,17 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
     int rc = IMAP_DONE;
 
     output = bufferevent_get_output(client_bev);
+    p = req->arguments.bv_val;
+
+    // temporarily until we have a way of handling literals
+    if (*p == '{' || *p == '"') {
+        evbuffer_add_printf(output, "%s BAD Sorry, I don't handle literals yet" CRLF, req->tag.bv_val);
+        return IMAP_OK;
+    }
 
     p = strchr(req->arguments.bv_val, ' ');
     if (!p) {
         evbuffer_add_printf(output, "%s NO Invalid command" CRLF, req->tag.bv_val);
-        return IMAP_OK;
-    }
-
-    // temporarily until we have a way of handling literals
-    if (p[1] == '{' || p[1] == '"') {
-        evbuffer_add_printf(output, "%s BAD Sorry, I don't handle literals yet" CRLF, req->tag.bv_val);
         return IMAP_OK;
     }
 
