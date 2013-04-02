@@ -12,7 +12,7 @@ typedef void (*shutdown_cb)(struct module *);
 typedef void (*destroy_cb)(struct module *);
 
 typedef void (*module_event_cb)(int, void *);
-typedef int (*register_module_event)(struct module *, int, module_event_cb);
+typedef int (*register_module_event)(struct module *, int, module_event_cb, void *);
 
 typedef enum {
     MODULE_READY = 0x1,

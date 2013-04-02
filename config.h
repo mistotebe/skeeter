@@ -7,7 +7,7 @@
     do { \
         const char *val = config_setting_get_string(setting); \
         if (val != NULL) { \
-            asprintf(&(target), "%s", val); \
+            target = strdup(val); \
         } \
     } while (0)
 
