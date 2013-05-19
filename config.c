@@ -71,7 +71,7 @@ process_config_file(struct config *config)
 
     if (config_read_file(&cfg, config->conffile) == CONFIG_FALSE) {
         /* failure */
-        fprintf(stderr, "Failure reading configuration file '%s' at line %d: %s",
+        skeeter_log(LOG_ERR, "Failure reading configuration file '%s' at line %d: %s",
                 config_error_file(&cfg), config_error_line(&cfg),
                 config_error_text(&cfg));
         return 1;

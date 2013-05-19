@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "filter.h"
+#include "logging.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,7 +77,7 @@ filter_create(struct filter *filter, const char *pattern)
                 entry->token_type = ADDR;
                 break;
             default:
-                fprintf(stderr, "Unsupported token %c\n", *ptr);
+                skeeter_log(LOG_CRIT, "Unsupported token %c\n", *ptr);
                 free(entry);
                 return 1;
         }

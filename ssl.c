@@ -1,4 +1,5 @@
 #include "ssl.h"
+#include "logging.h"
 
 #include <openssl/rand.h>
 
@@ -33,11 +34,11 @@ new_ssl_ctx(char *cert, char *pkey)
     server_ctx = SSL_CTX_new(SSLv23_method());
 
     if (!SSL_CTX_use_certificate_chain_file(server_ctx, cert)) {
-        printf("Could not read server certificate file\n");
+        skeeter_log(LOG_CRIT, "Could not read server certificate file\n");
         return NULL;
     }
     if (!SSL_CTX_use_PrivateKey_file(server_ctx, pkey, SSL_FILETYPE_PEM)) {
-        printf("Could not read server private key\n");
+        skeeter_log(LOG_CRIT, "Could not read server private key\n");
         return NULL;
     }
 

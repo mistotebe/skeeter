@@ -6,6 +6,7 @@
 #include <signal.h>
 
 #include "config.h"
+#include "logging.h"
 #include "imap.h"
 
 static void signal_cb(evutil_socket_t, short, void *);
@@ -26,7 +27,7 @@ int main(int argc, char** argv)
 
     base = event_base_new();
     if (!base) {
-        fprintf(stderr, "Could not initialize libevent!\n");
+        skeeter_log(LOG_CRIT, "Could not initialize libevent!");
         return 1;
     }
 
@@ -36,7 +37,7 @@ int main(int argc, char** argv)
             continue;
 
         if (module->init(module, base)) {
-            fprintf(stderr, "Could not initialize module '%s'\n", module->name);
+            skeeter_log(LOG_CRIT, "Could not initialize module '%s'", module->name);
             return 1;
         }
     }
@@ -44,7 +45,7 @@ int main(int argc, char** argv)
     signal_event = event_new(base, SIGINT, EV_SIGNAL, signal_cb, base);
 
     if (!signal_event || event_add(signal_event, NULL) < 0) {
-        fprintf(stderr, "Could not create/add a signal event!\n");
+        skeeter_log(LOG_CRIT, "Could not create/add a signal event!");
         return 1;
     }
 
@@ -71,7 +72,7 @@ signal_cb(evutil_socket_t sig, short events, void *user_data)
     struct timeval delay = { 2, 0 };
     struct module **p;
 
-    printf("Caught an interrupt signal; exiting cleanly in two seconds.\n");
+    skeeter_log(LOG_ERR, "Caught an interrupt signal; exiting cleanly in two seconds.");
 
     for (p = modules; *p; p++) {
         struct module *module = *p;
