@@ -1,5 +1,6 @@
 #include "config.h"
 #include "module.h"
+#include "logging.h"
 #include "avl/avl.h"
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +15,8 @@ static struct option options[] = {
 };
 
 struct config config = {
-    .conffile = "/etc/skeeter.conf"
+    .conffile = "/etc/skeeter.conf",
+    .loglevel = LOG_ERR,
 };
 
 int
