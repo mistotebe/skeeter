@@ -13,6 +13,7 @@
 
 struct config {
     int debug, shutdown;
+    int loglevel, facility;
     char *conffile;
     Avlnode *modules;
 };
