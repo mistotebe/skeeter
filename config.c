@@ -45,7 +45,7 @@ parse_options(int argc, char **argv, struct config *config)
                 break;
             default:
                 /* garbage in, bail */
-                fprintf(stderr, "Unknown parameter '%c'\n", opt);
+                return 1;
         }
     }
 
@@ -66,11 +66,6 @@ process_config_file(struct config *config)
     struct module **p;
 
     config_init(&cfg);
-
-    /*TODO: yeah, there should be a saner way of assigning defaults */
-    if (!config->conffile) {
-        config->conffile = "/etc/skeeter.conf";
-    }
 
     if (config_read_file(&cfg, config->conffile) == CONFIG_FALSE) {
         /* failure */

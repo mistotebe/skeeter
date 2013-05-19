@@ -60,7 +60,6 @@ int main(int argc, char** argv)
 
     /* we've stopped, exit */
     event_base_free(base);
-    //SSL_CTX_free(ctx);
 
     return 0;
 }
