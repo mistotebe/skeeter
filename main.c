@@ -1,5 +1,9 @@
 #include <event2/event.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -9,6 +13,7 @@
 #include "logging.h"
 #include "imap.h"
 
+static int detach(struct event_base *base);
 static void signal_cb(evutil_socket_t, short, void *);
 
 int main(int argc, char** argv)
@@ -49,6 +54,13 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (!config.debug) {
+        if (detach(base)) {
+            skeeter_log(LOG_CRIT, "Failed to detach");
+            return 1;
+        }
+    }
+
     /* run */
     event_base_dispatch(base);
 
@@ -61,8 +73,50 @@ int main(int argc, char** argv)
 
     /* we've stopped, exit */
     event_base_free(base);
+    if (!config.debug)
+        unlink(config.pidfile);
 
     return 0;
+}
+
+static int
+detach(struct event_base *base)
+{
+    int fd, rc = 0;
+    char *path;
+
+    skeeter_log(LOG_NOTICE, "Detaching");
+
+    fd = creat(config.pidfile, 0644);
+    if (fd < 0) {
+        rc = fd;
+        goto done;
+    }
+
+    /* The pidfile location could have been a relative path, but we are
+     * changing our dir to '/' and need an absolute one instead.
+     * realpath() requires that the file exists, so it cannot be done any
+     * sooner.
+     */
+    path = realpath(config.pidfile, NULL);
+    if (!path) {
+        rc = 1;
+        goto done;
+    }
+    config.pidfile = path;
+
+    rc = daemon(0, 0);
+    if (rc) goto done;
+
+    rc = event_reinit(base);
+    if (rc) goto done;
+
+    dprintf(fd, "%d", getpid());
+    rc = close(fd);
+    if (rc) goto done;
+
+done:
+    return rc;
 }
 
 static void

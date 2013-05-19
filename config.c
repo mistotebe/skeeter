@@ -9,13 +9,14 @@
 #include <getopt.h>
 #include <libconfig.h>
 
-static const char *shortopts = "f:d:v";
+static const char *shortopts = "f:dP:v";
 static struct option options[] = {
     { NULL }
 };
 
 struct config config = {
     .conffile = "/etc/skeeter.conf",
+    .pidfile = "/var/run/skeeter.pid",
     .loglevel = LOG_ERR,
 };
 
@@ -39,6 +40,10 @@ parse_options(int argc, char **argv, struct config *config)
             case 'f':
                 /* we have a config */
                 config->conffile = optarg;
+                break;
+            case 'P':
+                /* pidfile specified */
+                config->pidfile = optarg;
                 break;
             case 'v':
                 /* print version and end */
