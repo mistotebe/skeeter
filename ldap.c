@@ -297,6 +297,9 @@ ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
     /* have we lost the connection? Disable the module temporarily and try to
      * create another, possibly after some time has passed */
     if (events & (BEV_EVENT_ERROR | BEV_EVENT_EOF)) {
+        skeeter_log(LOG_WARNING, "Connection with LDAP server lost, "
+            "reconnecting in %ld seconds", driver->config->reconnect_timeout.tv_sec);
+
         // call the error handlers
         ldap_call_handlers(driver, MODULE_UNAVAILABLE);
         // flush the pending requests
@@ -428,6 +431,8 @@ ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
         return;
     }
 
+    skeeter_log(LOG_ERR, "LDAP connection failed, "
+            "retrying in %ld seconds", driver->config->reconnect_timeout.tv_sec);
     // otherwise cleanup and reconnect
 ldap_connect_cleanup:
     ldap_reset_connection(driver);
@@ -441,6 +446,8 @@ ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
     struct evdns_base *dnsbase = get_dnsbase();
     struct ldap_driver *driver = ctx;
     struct ldap_config *conf = driver->config;
+
+    skeeter_log(LOG_NOTICE, "Connecting to LDAP server at '%s'", conf->uri);
 
     /* we must have disowned it in ldap_close_connection */
     assert(driver->bev == NULL);
@@ -458,6 +465,10 @@ ldap_register_event(struct module *module, int flag, module_event_cb cb, void *c
 {
     struct ldap_q_entry *entry;
     struct ldap_driver *driver = module->priv;
+
+    skeeter_log(LOG_INFO, "module %s: registering %s events 0x%x", module->name,
+            flag & MODULE_PERSIST ? "persistent" : "one-off", flag);
+
     entry = calloc(1,sizeof(struct ldap_q_entry));
     if (entry == NULL)
         return 1;
