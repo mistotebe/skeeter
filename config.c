@@ -32,7 +32,7 @@ parse_options(int argc, char **argv, struct config *config)
                 break;
             case 'd':
                 /* do not detach - we are in debug mode */
-                config->debug = atoi(optarg);
+                config->debug++;
                 break;
             case 'f':
                 /* we have a config */
