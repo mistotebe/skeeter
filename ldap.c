@@ -149,7 +149,7 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
     struct ldap_config *config;
     struct ldap_driver *driver;
     const char *val;
-    char *password;
+    char *password = NULL;
     int tout;
 
     if (conf == NULL)
@@ -200,6 +200,10 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
             asprintf(ptr->addr, "%s", val);
     }
 
+    if (config->bind_dn && !password) {
+        skeeter_log(LOG_CRIT, "Bind DN set but no password specified");
+        return 1;
+    }
     ber_str2bv(password, 0, 0, &config->password);
 
     // filter is mandatory

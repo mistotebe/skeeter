@@ -105,9 +105,10 @@ filter_create(struct filter *filter, const char *pattern)
 char *
 filter_get(struct filter *filter, struct user_info *info)
 {
-    char *result, *ptr;
+    char *ptr, *result = NULL;
     struct filter_part *item;
-    struct berval esc_username, esc_domainname;
+    struct berval esc_username = { .bv_len = 0 };
+    struct berval esc_domainname = { .bv_len = 0 };
     int addr_len, total;
 
     if (ldap_bv2escaped_filter_value(&info->username, &esc_username))
