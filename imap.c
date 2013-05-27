@@ -444,6 +444,50 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
         return IMAP_OK;
     }
 
+#if 0
+    switch (*arg) {
+        case '"':
+            {
+                char *quote = arg;
+
+                username.arg_type = ARG_QUOTED;
+                do {
+                    int escaped = 0;
+
+                    quote = strchr(quote+1, '"');
+                    if (!quote) {
+                        /* invalid request */
+                    }
+
+                    /* find out whether it's escaped (= has an odd number of
+                     * backslashes in front of it */
+                    p = quote;
+                    while (*(--p) == '\\')
+                        escaped = !escaped;
+                } while (escaped);
+            }
+            break;
+        case '{':
+            username.arg_type = ARG_LITERAL;
+
+            /* find out how much data was requested */
+            p = arg + 1;
+            if (!(*p > '0' && *p <= '9')) {
+                /* invalid */
+            }
+            while (*p >= '0' && *p <= '9')
+                /* just skip over it */;
+
+            /* receive the data */
+            break;
+        default:
+            username.arg_type = ARG_ATOM;
+            username.arg_val = arg;
+            username.arg_len = p - arg;
+            break;
+    }
+#endif
+
     len = p - arg; // length of whole "username@domain"
 
     p = user_info.username.bv_val = malloc(len + 1);

@@ -32,6 +32,22 @@ extern struct module imap_module;
 typedef int (*imap_request_handler)(struct imap_context *, struct imap_request *, void *);
 
 typedef enum {
+    ARG_ATOM,
+    ARG_QUOTED,
+    ARG_LITERAL,
+    ARG_BINARY /* unimplemented */
+} arg_type;
+
+struct imap_arg {
+    arg_type arg_type;
+    struct berval value;
+#define arg_len value.bv_len
+#define arg_val value.bv_val
+
+//    STAILQ_ENTRY(imap_arg) next;
+};
+
+typedef enum {
     /* only login params can contain literal */
     IMAP_MULTILINE = 0x1,
     IMAP_TLS = 0x2,
