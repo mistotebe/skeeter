@@ -15,6 +15,9 @@
 
 static int imap_driver_install(struct bufferevent *, struct imap_driver *);
 
+static int parse_request(struct imap_request *, const char *);
+static void request_free(struct imap_request *);
+
 static void trigger_listener(int, void *);
 static void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
 static void conn_readcb(struct bufferevent *, void *);
@@ -262,57 +265,69 @@ conn_readcb(struct bufferevent *bev, void *user_data)
     skeeter_log(LOG_INFO, "Ready to read");
     while (rc == IMAP_OK && (line = evbuffer_readln(input, &bytes_read, EVBUFFER_EOL_CRLF))) {
         struct imap_request *req = calloc(1, sizeof(struct imap_request));
-        char *p, *end;
-        ssize_t len;
 
-        debug(LOG_DEBUG, "Client said: '%s'", line);
-
-        /* parse the request properly instead of this one-off code */
-        p = line;
-        end = strchrnul(p, ' ');
-        len = end - p;
-
-        req->tag.bv_val = malloc(len + 1);
-        req->tag.bv_len = len;
-        memcpy(req->tag.bv_val, p, len);
-        req->tag.bv_val[len] = '\0';
-
-        if (*end != ' ') {
+        if (parse_request(req, line)) {
             skeeter_log(LOG_NOTICE, "invalid request");
             goto cleanup;
         }
-        p = end + 1;
-
-        end = strchrnul(p, ' ');
-        len = end - p;
-
-        req->command.bv_val = malloc(len + 1);
-        req->command.bv_len = len;
-        memcpy(req->command.bv_val, p, len);
-        req->command.bv_val[len] = '\0';
-
-        if (*end == ' ') {
-            p = end + 1;
-
-            // luckily the potentially longest part of the line needs no copying
-            req->arguments.bv_val = p;
-            req->arguments.bv_len = strlen(p);
-        } else if (*end != '\0') {
-            skeeter_log(LOG_NOTICE, "invalid request");
-            goto cleanup;
-        }
-
-        req->line.bv_val = line;
-        req->line.bv_len = strlen(line);
 
         rc = imap_handle_request(driver_ctx, req);
         skeeter_log(LOG_INFO, "Request handled, result=%d", rc);
+
 cleanup:
-        // all pointers are valid or NULL, and NULL is ok for free()
-        free(req->command.bv_val);
-        free(req->tag.bv_val);
+        request_free(req);
         free(line);
     }
+}
+
+/**
+ * Parse the outline of an IMAP request.
+ *
+ * All IMAP requests are of the form:
+ * REQ := TAG SP COMMAND ( SP ARG )* CRLF
+ *
+ * CRLF at the end of the request (or beginning of arg) has been cut by
+ * evbuffer_readln already, so what remains is a natural nul byte as the end of
+ * the string.
+ */
+static int
+parse_request(struct imap_request *req, const char *line)
+{
+    const char *p, *end;
+    ssize_t len;
+
+    debug(LOG_DEBUG, "Parsing a new request: '%s'", line);
+
+    ber_str2bv(line, 0, 0, &req->line);
+
+    p = line;
+    end = strchr(p, ' ');
+    if (!end)
+        return 1;
+
+    len = end - p;
+    ber_str2bv(p, 1, len, &req->tag);
+
+    p = end + 1;
+    end = strchrnul(p, ' ');
+
+    len = end - p;
+    ber_str2bv(p, 1, len, &req->command);
+
+    if (*end) {
+        /* Keep arguments unparsed, they are command specific */
+        p = end + 1;
+        ber_str2bv(p, 0, 0, &req->arguments);
+    }
+    return 0;
+}
+
+static void
+request_free(struct imap_request *req)
+{
+    ber_memfree(req->tag.bv_val);
+    ber_memfree(req->command.bv_val);
+    free(req);
 }
 
 static int
