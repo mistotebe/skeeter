@@ -5,6 +5,7 @@
 #include "ldap.h"
 #include "io_handler.h"
 #include "filter.h"
+#include "logging.h"
 #include <sys/queue.h>
 #include <lber.h>
 #include <errno.h>
@@ -129,7 +130,7 @@ ldap_driver_init(struct module *module, struct event_base *base)
     driver->reconnect_event = event_new(base, -1, EV_TIMEOUT, ldap_driver_connect_cb,
                                 driver);
     if (driver->reconnect_event == NULL) {
-        fprintf(stderr, "Failed to create LDAP handling event\n");
+        skeeter_log(LOG_ERR, "Failed to create LDAP handling event");
         return 1;
     }
 
@@ -148,7 +149,7 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
     struct ldap_config *config;
     struct ldap_driver *driver;
     const char *val;
-    char *password;
+    char *password = NULL;
     int tout;
 
     if (conf == NULL)
@@ -179,11 +180,11 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
 
     if (ldap_is_ldap_url(config->uri)) {
         if (ldap_url_parse(config->uri,&(config->data))) {
-            fprintf(stderr, "Can not parse LDAP URI\n");
+            skeeter_log(LOG_CRIT, "Can not parse LDAP URI '%s'", config->uri);
             return 1;
         }
     } else {
-        fprintf(stderr, "Wrong format of ldap URI\n");
+        skeeter_log(LOG_CRIT, "Wrong format of ldap URI '%s'", config->uri);
         return 1;
     }
 
@@ -199,6 +200,10 @@ ldap_driver_config(struct module *module, config_setting_t *conf)
             asprintf(ptr->addr, "%s", val);
     }
 
+    if (config->bind_dn && !password) {
+        skeeter_log(LOG_CRIT, "Bind DN set but no password specified");
+        return 1;
+    }
     ber_str2bv(password, 0, 0, &config->password);
 
     // filter is mandatory
@@ -239,7 +244,7 @@ get_ldap_errcode(LDAP* ld, LDAPMessage *msg)
  */
     int result;
     if ( ldap_parse_result(ld, msg, &result, NULL, NULL, NULL, NULL, 0) != LDAP_SUCCESS ) {
-        fprintf(stderr, "Unable to parse ldap result\n");
+        skeeter_log(LOG_ERR, "Unable to parse ldap result");
         return -1;
     }
     return result;
@@ -296,6 +301,9 @@ ldap_error_cb(struct bufferevent *bev, short events, void *ctx)
     /* have we lost the connection? Disable the module temporarily and try to
      * create another, possibly after some time has passed */
     if (events & (BEV_EVENT_ERROR | BEV_EVENT_EOF)) {
+        skeeter_log(LOG_WARNING, "Connection with LDAP server lost, "
+            "reconnecting in %ld seconds", driver->config->reconnect_timeout.tv_sec);
+
         // call the error handlers
         ldap_call_handlers(driver, MODULE_UNAVAILABLE);
         // flush the pending requests
@@ -323,7 +331,7 @@ ldap_read_cb(struct bufferevent *bev, void *ctx)
 
         // handle unsolicited message
         if (needle.msgid == 0) {
-            fprintf(stderr,"LDAP server shutting down\n");
+            skeeter_log(LOG_WARNING, "LDAP server shutting down");
             ldap_error_cb(bev, BEV_EVENT_EOF, ctx);
             ldap_msgfree(res);
             break;
@@ -332,7 +340,7 @@ ldap_read_cb(struct bufferevent *bev, void *ctx)
         found = avl_find(driver->pending_requests, &needle, request_cmp);
         // it is probably too early or too late to get the result
         if (found == NULL) {
-            fprintf(stderr, "Got response for non-existent request\n");
+            skeeter_log(LOG_WARNING, "Got response for non-existent request");
             ldap_msgfree(res);
             continue;
         }
@@ -346,7 +354,7 @@ ldap_read_cb(struct bufferevent *bev, void *ctx)
                 errcode = get_ldap_errcode(driver->ld, res);
 
                 if (errcode != LDAP_SUCCESS) {
-                    fprintf(stderr, "Error during reading results: %s\n", ldap_err2string(errcode));
+                    skeeter_log(LOG_ERR, "Error reading LDAP results: %s", ldap_err2string(errcode));
                     found->cb(driver->ld, NULL, found->ctx);
                 } else {
                     found->cb(driver->ld, found->msg, found->ctx);
@@ -377,11 +385,11 @@ ldap_bind_cb(struct bufferevent *bev, void *ctx)
 
         if ( msgtype == LDAP_RES_BIND ) {
             if ( errcode == LDAP_SUCCESS ) {
-                fprintf(stderr,"We are binded\n");
+                skeeter_log(LOG_INFO, "LDAP bind successful");
                 bufferevent_setcb(bev, ldap_read_cb, NULL, ldap_error_cb, ctx);
                 ldap_call_handlers(driver, MODULE_READY);
             } else {
-                fprintf(stderr, "Bind failed: %s\n", ldap_err2string(errcode));
+                skeeter_log(LOG_ERR, "Bind failed: %s", ldap_err2string(errcode));
                 ldap_reset_connection(driver);
             }
             break;
@@ -405,12 +413,12 @@ ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
 
         ldap_get_option(driver->ld, LDAP_OPT_SOCKBUF, &sb);
         if (sb == NULL) {
-            fprintf(stderr, "Could not retrieve sockbuf\n");
+            skeeter_log(LOG_ERR, "Could not retrieve sockbuf");
             goto ldap_connect_cleanup;
         }
 
         if (ber_sockbuf_add_io(sb, &ber_sockbuf_io_libevent, LBER_SBIOD_LEVEL_PROVIDER, bev)) {
-            fprintf(stderr, "Could not install sockbuf handler\n");
+            skeeter_log(LOG_ERR, "Could not install sockbuf handler");
             goto ldap_connect_cleanup;
         }
         errno = 0;
@@ -420,13 +428,15 @@ ldap_connect_cb(struct bufferevent *bev, short events, void *ctx)
                             LDAP_SASL_SIMPLE, &driver->config->password,
                             NULL, NULL, &msgid);
         if (rc != LDAP_SUCCESS) {
-            fprintf(stderr, "error during bind: %s\n", ldap_err2string(rc));
+            skeeter_log(LOG_ERR, "error during bind: %s", ldap_err2string(rc));
             goto ldap_connect_cleanup;
         }
 
         return;
     }
 
+    skeeter_log(LOG_ERR, "LDAP connection failed, "
+            "retrying in %ld seconds", driver->config->reconnect_timeout.tv_sec);
     // otherwise cleanup and reconnect
 ldap_connect_cleanup:
     ldap_reset_connection(driver);
@@ -440,6 +450,8 @@ ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
     struct evdns_base *dnsbase = get_dnsbase();
     struct ldap_driver *driver = ctx;
     struct ldap_config *conf = driver->config;
+
+    skeeter_log(LOG_NOTICE, "Connecting to LDAP server at '%s'", conf->uri);
 
     /* we must have disowned it in ldap_close_connection */
     assert(driver->bev == NULL);
@@ -457,6 +469,10 @@ ldap_register_event(struct module *module, int flag, module_event_cb cb, void *c
 {
     struct ldap_q_entry *entry;
     struct ldap_driver *driver = module->priv;
+
+    skeeter_log(LOG_INFO, "module %s: registering %s events 0x%x", module->name,
+            flag & MODULE_PERSIST ? "persistent" : "one-off", flag);
+
     entry = calloc(1,sizeof(struct ldap_q_entry));
     if (entry == NULL)
         return 1;
@@ -481,7 +497,7 @@ get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *c
     /* construct the search filter */
     char *filter = filter_get(&config->filter, info);
     if (filter == NULL) {
-        fprintf(stderr, "Failed to construct filter\n");
+        skeeter_log(LOG_ERR, "Failed to construct filter");
         rc = 1;
         goto get_user_info_fail;
     }
@@ -496,7 +512,7 @@ get_user_info(struct module *module, struct user_info *info, ldap_cb cb, void *c
                          &req->msgid);
 
     if (rc != LDAP_SUCCESS) {
-        fprintf(stderr,"ldap_search failed for filter '%s' with error '%s'\n",filter,ldap_err2string(rc));
+        skeeter_log(LOG_ERR, "ldap_search failed for filter '%s' with error '%s'", filter, ldap_err2string(rc));
         goto get_user_info_fail;
     }
 

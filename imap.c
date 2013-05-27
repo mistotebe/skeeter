@@ -3,6 +3,7 @@
 #include "ldap.h"
 #include "config.h"
 #include "module.h"
+#include "logging.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
@@ -179,18 +180,18 @@ imap_driver_init(struct module *module, struct event_base *base)
      * on accept()? */
 
     if (!driver->listener) {
-        fprintf(stderr, "Could not create a listener!\n");
+        skeeter_log(LOG_CRIT, "Could not create a listener!");
         return 1;
     }
 
     ldap = get_module("ldap");
     if (!ldap || !ldap->register_event) {
-        fprintf(stderr, "LDAP module not available!\n");
+        skeeter_log(LOG_CRIT, "LDAP module not available!");
         return 1;
     }
 
     if (ldap->register_event(ldap, MODULE_ANY | MODULE_PERSIST, trigger_listener, driver->listener)) {
-        fprintf(stderr, "Regitration with LDAP module failed!\n");
+        skeeter_log(LOG_CRIT, "Regitration with LDAP module failed!");
         return 1;
     }
 
@@ -218,13 +219,13 @@ listen_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *
 
     bev = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE);
     if (!bev) {
-        fprintf(stderr, "Could not acquire bufferevent!\n");
+        skeeter_log(LOG_CRIT, "Could not acquire bufferevent!");
         event_base_loopbreak(base);
         return;
     }
 
     bufferevent_write(bev, "* CAPABILITY IMAP4rev1 STARTTLS" CRLF, 33);
-    printf("A connection\n");
+    skeeter_log(LOG_INFO, "A new connection established");
     imap_driver_install(bev, driver);
 }
 
@@ -232,19 +233,19 @@ static void
 conn_eventcb(struct bufferevent *bev, short events, void *user_data)
 {
     if (events & BEV_EVENT_EOF) {
-        printf("Connection closed.\n");
+        skeeter_log(LOG_INFO, "Connection closed.");
     } else if (events & BEV_EVENT_ERROR) {
-        printf("Got an error on the connection: %s\n",
+        skeeter_log(LOG_WARNING, "Got an error on the connection: %s",
                 strerror(errno));
-        printf("OpenSSL error %lu\n", bufferevent_get_openssl_error(bev));
+        skeeter_log(LOG_WARNING, "OpenSSL error is %lu", bufferevent_get_openssl_error(bev));
     } else if (events & BEV_EVENT_TIMEOUT) {
-        printf("Got a timeout on %s, closing connection.\n", (events & BEV_EVENT_READING) ? "reading" : "writing");
+        skeeter_log(LOG_NOTICE, "Got a timeout on %s, closing connection.", (events & BEV_EVENT_READING) ? "reading" : "writing");
     } else if (events & BEV_EVENT_CONNECTED) {
-        printf("Looks like ssl handshake completed.\n");
-        printf("OpenSSL error %lu\n", bufferevent_get_openssl_error(bev));
+        skeeter_log(LOG_NOTICE, "Looks like ssl handshake completed.");
+        skeeter_log(LOG_DEBUG, "OpenSSL error %lu", bufferevent_get_openssl_error(bev));
         return;
     }
-    printf("Freeing connection data\n");
+    skeeter_log(LOG_NOTICE, "Freeing connection data");
     bufferevent_free(bev);
     free(user_data);
 }
@@ -258,13 +259,13 @@ conn_readcb(struct bufferevent *bev, void *user_data)
     size_t bytes_read;
     int rc = IMAP_OK;
 
-    printf("Ready to read\n");
+    skeeter_log(LOG_INFO, "Ready to read");
     while (rc == IMAP_OK && (line = evbuffer_readln(input, &bytes_read, EVBUFFER_EOL_CRLF))) {
         struct imap_request *req = calloc(1, sizeof(struct imap_request));
         char *p, *end;
         ssize_t len;
 
-        printf("Client said: '%s'\n", line);
+        debug(LOG_DEBUG, "Client said: '%s'", line);
 
         /* parse the request properly instead of this one-off code */
         p = line;
@@ -277,7 +278,7 @@ conn_readcb(struct bufferevent *bev, void *user_data)
         req->tag.bv_val[len] = '\0';
 
         if (*end != ' ') {
-            printf("invalid request\n");
+            skeeter_log(LOG_NOTICE, "invalid request");
             goto cleanup;
         }
         p = end + 1;
@@ -297,7 +298,7 @@ conn_readcb(struct bufferevent *bev, void *user_data)
             req->arguments.bv_val = p;
             req->arguments.bv_len = strlen(p);
         } else if (*end != '\0') {
-            printf("invalid request\n");
+            skeeter_log(LOG_NOTICE, "invalid request");
             goto cleanup;
         }
 
@@ -305,7 +306,7 @@ conn_readcb(struct bufferevent *bev, void *user_data)
         req->line.bv_len = strlen(line);
 
         rc = imap_handle_request(driver_ctx, req);
-        printf("Request handled, result=%d\n", rc);
+        skeeter_log(LOG_INFO, "Request handled, result=%d", rc);
 cleanup:
         // all pointers are valid or NULL, and NULL is ok for free()
         free(req->command.bv_val);
@@ -342,7 +343,7 @@ imap_handle_request(struct imap_context *ctx, struct imap_request *req)
     struct imap_handler *handler = avl_find(ctx->driver->commands, &h, imap_handler_cmp);
 
     if (handler == NULL) {
-        printf("No handler defined for command '%s'\n", req->command.bv_val);
+        skeeter_log(LOG_NOTICE, "No handler defined for command '%s'", req->command.bv_val);
         evbuffer_add_printf(output, "%s BAD Command %s unrecognized" CRLF, req->tag.bv_val, req->command.bv_val);
         return IMAP_OK;
     }
@@ -514,20 +515,20 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
     //assert(bev == ctx->server_bev);
 
     if (events & BEV_EVENT_EOF) {
-        printf("Connection closed.\n");
+        skeeter_log(LOG_NOTICE, "Connection closed.");
     } else if (events & BEV_EVENT_ERROR) {
-        printf("Got an error on the connection: %s\n",
+        skeeter_log(LOG_WARNING, "Got an error on the connection: %s",
                 strerror(errno));
     } else if (events & BEV_EVENT_TIMEOUT) {
-        printf("Got a timeout on %s, closing connection.\n", (events & BEV_EVENT_READING) ? "reading" : "writing");
+        skeeter_log(LOG_NOTICE, "Got a timeout on %s, closing connection.", (events & BEV_EVENT_READING) ? "reading" : "writing");
     } else if (events & BEV_EVENT_CONNECTED) {
-        printf("Looks like we are connected, proxying...\n");
+        skeeter_log(LOG_NOTICE, "Looks like we are connected, proxying...");
         bufferevent_setcb(ctx->server_bev, proxy_cb, NULL, server_connect_cb, ctx);
         bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, server_connect_cb, ctx);
         bufferevent_enable(ctx->client_bev, EV_READ);
         return;
     }
-    printf("Freeing connection data\n");
+    skeeter_log(LOG_INFO, "Freeing connection data");
     bufferevent_free(ctx->server_bev);
     bufferevent_free(ctx->client_bev);
     free(ctx);
@@ -543,8 +544,8 @@ proxy_cb(struct bufferevent *source, void *priv)
     struct bufferevent *target = (source == ctx->client_bev) ?
                                 ctx->server_bev : ctx->client_bev;
 
-    printf("Proxying %zu bytes from %s.\n", evbuffer_get_length(input),
+    skeeter_log(LOG_INFO, "Proxying %zu bytes from %s.", evbuffer_get_length(input),
             (source == ctx->client_bev) ? "client" : "server");
-    printf("%.*s", evbuffer_get_length(input), evbuffer_pullup(input, -1));
+    debug(LOG_DEBUG, "%.*s", evbuffer_get_length(input), evbuffer_pullup(input, -1));
     bufferevent_write_buffer(target, input);
 }

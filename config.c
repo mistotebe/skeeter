@@ -1,5 +1,6 @@
 #include "config.h"
 #include "module.h"
+#include "logging.h"
 #include "avl/avl.h"
 #include <stdlib.h>
 #include <string.h>
@@ -8,13 +9,15 @@
 #include <getopt.h>
 #include <libconfig.h>
 
-static const char *shortopts = "f:d:v";
+static const char *shortopts = "f:dP:v";
 static struct option options[] = {
     { NULL }
 };
 
 struct config config = {
-    .conffile = "/etc/skeeter.conf"
+    .conffile = "/etc/skeeter.conf",
+    .pidfile = "/var/run/skeeter.pid",
+    .loglevel = LOG_ERR,
 };
 
 int
@@ -32,11 +35,15 @@ parse_options(int argc, char **argv, struct config *config)
                 break;
             case 'd':
                 /* do not detach - we are in debug mode */
-                config->debug = atoi(optarg);
+                config->debug++;
                 break;
             case 'f':
                 /* we have a config */
                 config->conffile = optarg;
+                break;
+            case 'P':
+                /* pidfile specified */
+                config->pidfile = optarg;
                 break;
             case 'v':
                 /* print version and end */
@@ -45,7 +52,7 @@ parse_options(int argc, char **argv, struct config *config)
                 break;
             default:
                 /* garbage in, bail */
-                fprintf(stderr, "Unknown parameter '%c'\n", opt);
+                return 1;
         }
     }
 
@@ -60,21 +67,16 @@ parse_options(int argc, char **argv, struct config *config)
 int
 process_config_file(struct config *config)
 {
-    int rc;
+    int rc = 0;
     config_t cfg;
     config_setting_t *root;
     struct module **p;
 
     config_init(&cfg);
 
-    /*TODO: yeah, there should be a saner way of assigning defaults */
-    if (!config->conffile) {
-        config->conffile = "/etc/skeeter.conf";
-    }
-
     if (config_read_file(&cfg, config->conffile) == CONFIG_FALSE) {
         /* failure */
-        fprintf(stderr, "Failure reading configuration file '%s' at line %d: %s",
+        skeeter_log(LOG_ERR, "Failure reading configuration file '%s' at line %d: %s",
                 config_error_file(&cfg), config_error_line(&cfg),
                 config_error_text(&cfg));
         return 1;

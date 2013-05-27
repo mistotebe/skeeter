@@ -11,7 +11,6 @@
 static int
 sb_libevent_setup(Sockbuf_IO_Desc *sbiod, void *arg)
 {
-    printf( "%s: invoked\n", __func__ );
     sbiod->sbiod_pvt = arg;
     return 0;
 }
@@ -19,7 +18,6 @@ sb_libevent_setup(Sockbuf_IO_Desc *sbiod, void *arg)
 void
 sb_libevent_all_sent(struct bufferevent *bev, void *ctx)
 {
-    printf( "%s: invoked\n", __func__ );
     struct evbuffer *buffer = bufferevent_get_output(bev);
 
     assert( evbuffer_get_length(buffer) == 0 );
@@ -30,14 +28,12 @@ sb_libevent_all_sent(struct bufferevent *bev, void *ctx)
 static int
 sb_libevent_remove(Sockbuf_IO_Desc *sbiod)
 {
-    printf( "%s: invoked\n", __func__ );
     return 0;
 }
 
 static int
 sb_libevent_ctrl(Sockbuf_IO_Desc *sbiod, int opt, void *arg)
 {
-    printf( "%s: invoked\n", __func__ );
     switch (opt) {
         case LBER_SB_OPT_DATA_READY:
             {
@@ -46,7 +42,6 @@ sb_libevent_ctrl(Sockbuf_IO_Desc *sbiod, int opt, void *arg)
                 struct bufferevent *bev = sbiod->sbiod_pvt;
                 struct evbuffer *buffer = bufferevent_get_input(bev);
 
-                printf( "Asked whether there is data to read, have %zu\n", evbuffer_get_length(buffer) );
                 return (evbuffer_get_length(buffer) != 0);
                 break;
             }
@@ -63,7 +58,6 @@ sb_libevent_read(Sockbuf_IO_Desc *sbiod, void *buf, ber_len_t len)
     struct bufferevent *bev = sbiod->sbiod_pvt;
     ber_slen_t read;
 
-    printf( "%s: invoked\n", __func__ );
     read = bufferevent_read(bev, buf, len);
     /* Were we to return a zero length read without setting errno, liblber
      * would think the socket is closed and give up on it */
@@ -75,7 +69,6 @@ sb_libevent_read(Sockbuf_IO_Desc *sbiod, void *buf, ber_len_t len)
 static ber_slen_t
 sb_libevent_write(Sockbuf_IO_Desc *sbiod, void *buf, ber_len_t len)
 {
-    printf( "%s: invoked\n", __func__ );
     struct bufferevent *bev = sbiod->sbiod_pvt;
     int rc;
 
@@ -87,7 +80,6 @@ sb_libevent_write(Sockbuf_IO_Desc *sbiod, void *buf, ber_len_t len)
 static int
 sb_libevent_close(Sockbuf_IO_Desc *sbiod)
 {
-    printf( "%s: invoked\n", __func__ );
     struct bufferevent *bev = sbiod->sbiod_pvt;
     bufferevent_data_cb readcb, writecb;
     bufferevent_event_cb eventcb;

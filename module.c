@@ -1,9 +1,11 @@
 #include "module.h"
 #include "config.h"
+#include "logging.h"
 #include "imap.h"
 #include "ldap.h"
 
 struct module *modules[] = {
+    &logging_module,
     &imap_module,
     &ldap_module,
     NULL
