@@ -4,6 +4,7 @@
 #include "config.h"
 #include "module.h"
 #include "logging.h"
+#include "chaining.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
@@ -422,41 +423,86 @@ static int
 imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
 {
     struct bufferevent *client_bev = ctx->client_bev;
-    struct evbuffer *output;
-    struct user_info user_info = {};
-    char *attrs[2] = { "mailhost", NULL };
-    char *p, *arg;
-    ssize_t len, len_domain;
-    int rc = IMAP_DONE;
+    struct imap_arg *arg;
 
-    output = bufferevent_get_output(client_bev);
-    arg = req->arguments.bv_val;
+    arg = ctx->priv = calloc(2, sizeof(imap_arg));
+    if (!arg)
+        goto cleanup;
 
-    // temporarily until we have a way of handling literals
-    if (*arg == '{' || *arg == '"') {
-        evbuffer_add_printf(output, "%s BAD Sorry, I don't handle literals yet" CRLF, req->tag.bv_val);
-        return IMAP_OK;
+    chain = chain_new(imap_login_cleanup, ctx);
+    if (!chain)
+        goto cleanup;
+
+    chain_add(chain, imap_astring, NULL, arg);
+
+    arg++;
+    arg->type = ARG_LAST;
+    chain_add(chain, imap_astring, NULL, arg);
+
+    chain_add(chain, imap_credential_check, NULL, ctx);
+    chain_activate(chain, ctx->client_bev, EV_READ);
+    return IMAP_DONE;
+
+cleanup:
+    free(ctx->priv);
+    chain_destroy(chain);
+    return IMAP_ERROR;
+}
+
+static int
+imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    imap_arg *dest = ctx;
+    char *arg, *p;
+    struct evbuffer_ptr *pos;
+    int eol_pos, end_pos;
+
+    if ((dest->type & ARG_TYPES) == ARG_LITERAL) {
+        int need = dest->arg_len - evbuffer_get_length(dest->buffer);
+
+        /* Add as much data as possible to the buffer */
+        need -= evbuffer_remove_buffer(input, dest->buffer, need);
+        assert(need >= 0);
+
+        if (need)
+            return CHAIN_AGAIN;
+        else
+            return CHAIN_DONE;
     }
 
-    p = strchr(arg, ' ');
-    if (!p) {
-        evbuffer_add_printf(output, "%s NO Invalid command" CRLF, req->tag.bv_val);
-        return IMAP_OK;
+    pos = evbuffer_search_eol(input, NULL, NULL, EVBUFFER_EOL_CRLF);
+    if (!pos)
+        return CHAIN_ERROR;
+    eol_pos = pos->pos;
+    free(pos);
+
+    if (arg->type & ARG_LAST) {
+        end_pos = eol_pos;
+    } else {
+        pos = evbuffer_search(input, " ", 1, NULL, NULL);
+        end_pos = pos->pos;
+        free(pos);
     }
 
-#if 0
+    arg = evbuffer_pullup(input, 1);
     switch (*arg) {
         case '"':
             {
-                char *quote = arg;
+                char *quote = evbuffer_pullup(input, -1);
 
-                username.arg_type = ARG_QUOTED;
+                dest->arg_type = ARG_QUOTED;
                 do {
                     int escaped = 0;
 
                     quote = strchr(quote+1, '"');
                     if (!quote) {
-                        /* invalid request */
+                        if (eol_pos >= 0) {
+                            /* invalid request */
+                            return CHAIN_ERROR;
+                        } else {
+                            /* need more data */
+                            return CHAIN_AGAIN;
+                        }
                     }
 
                     /* find out whether it's escaped (= has an odd number of
@@ -468,7 +514,7 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
             }
             break;
         case '{':
-            username.arg_type = ARG_LITERAL;
+            dest->arg_type = ARG_LITERAL;
 
             /* find out how much data was requested */
             p = arg + 1;
@@ -478,15 +524,34 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
             while (*p >= '0' && *p <= '9')
                 /* just skip over it */;
 
+            /* parse the number and set dest->arg_len */
             /* receive the data */
             break;
         default:
-            username.arg_type = ARG_ATOM;
-            username.arg_val = arg;
-            username.arg_len = p - arg;
+            dest->arg_type = ARG_ATOM;
+            if (end_pos == -1)
+                return CHAIN_AGAIN;
+
+            dest->arg_len = end_pos;
+            evbuffer_remove_buffer(input, dest->buffer, end_pos);
             break;
     }
-#endif
+}
+
+static int
+imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
+{
+    struct imap_context *ctx = priv;
+    struct imap_arg *args = ctx->priv;
+    struct evbuffer *output;
+    struct user_info user_info = {};
+    char *attrs[2] = { "mailhost", NULL };
+    char *p, *arg;
+    ssize_t len, len_domain;
+    int rc = CHAIN_DONE;
+
+    output = bufferevent_get_output(client_bev);
+    arg = req->arguments.bv_val;
 
     len = p - arg; // length of whole "username@domain"
 

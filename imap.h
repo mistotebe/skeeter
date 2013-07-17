@@ -32,17 +32,26 @@ extern struct module imap_module;
 typedef int (*imap_request_handler)(struct imap_context *, struct imap_request *, void *);
 
 typedef enum {
+    ARG_UNKNOWN,
     ARG_ATOM,
     ARG_QUOTED,
     ARG_LITERAL,
-    ARG_BINARY /* unimplemented */
+    ARG_BINARY, /* unimplemented */
+    ARG_TYPES = 0xff,
+    ARG_LAST = 0x100,
 } arg_type;
 
 struct imap_arg {
     arg_type arg_type;
-    struct berval value;
-#define arg_len value.bv_len
-#define arg_val value.bv_val
+    size_t arg_len;
+    union arg_union {
+        char *value;
+        struct evbuffer *buffer;
+    } value;
+    size_t arg_full_len;
+#define arg_atom value.value
+#define arg_quoted value.value
+#define arg_buf value.buffer
 
 //    STAILQ_ENTRY(imap_arg) next;
 };
