@@ -99,8 +99,6 @@ struct imap_handler {
 struct imap_request {
     BerValue tag;
     BerValue command;
-    BerValue arguments;
-    BerValue line;
 };
 
 int imap_handler_cmp(const void *, const void *);

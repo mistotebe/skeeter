@@ -16,7 +16,7 @@
 
 static int imap_driver_install(struct bufferevent *, struct imap_driver *);
 
-static int parse_request(struct imap_request *, const char *);
+static int parse_request(struct imap_request *, struct evbuffer *, ssize_t);
 static void request_free(struct imap_request *);
 
 static void trigger_listener(int, void *);
@@ -259,15 +259,20 @@ conn_readcb(struct bufferevent *bev, void *user_data)
 {
     struct evbuffer *input = bufferevent_get_input(bev);
     struct imap_context *driver_ctx = user_data;
-    char *line;
-    size_t bytes_read;
     int rc = IMAP_OK;
 
     skeeter_log(LOG_INFO, "Ready to read");
-    while (rc == IMAP_OK && (line = evbuffer_readln(input, &bytes_read, EVBUFFER_EOL_CRLF))) {
-        struct imap_request *req = calloc(1, sizeof(struct imap_request));
+    while (rc == IMAP_OK) {
+        struct evbuffer_ptr pos;
+        struct imap_request *req;
 
-        if (parse_request(req, line)) {
+        pos = evbuffer_search_eol(input, NULL, NULL, EVBUFFER_EOL_CRLF);
+        if (pos.pos == -1)
+            break;
+
+        req = calloc(1, sizeof(struct imap_request));
+
+        if (parse_request(req, input, pos.pos)) {
             skeeter_log(LOG_NOTICE, "invalid request");
             goto cleanup;
         }
@@ -277,7 +282,6 @@ conn_readcb(struct bufferevent *bev, void *user_data)
 
 cleanup:
         request_free(req);
-        free(line);
     }
 }
 
@@ -287,22 +291,18 @@ cleanup:
  * All IMAP requests are of the form:
  * REQ := TAG SP COMMAND ( SP ARG )* CRLF
  *
- * CRLF at the end of the request (or beginning of arg) has been cut by
- * evbuffer_readln already, so what remains is a natural nul byte as the end of
- * the string.
+ * We cut the TAG SP COMMAND part and populate the req struct with them.
  */
 static int
-parse_request(struct imap_request *req, const char *line)
+parse_request(struct imap_request *req, struct evbuffer *input, ssize_t eol)
 {
     const char *p, *end;
-    ssize_t len;
+    ssize_t len, to_drain = 0;
 
-    debug(LOG_DEBUG, "Parsing a new request: '%s'", line);
+    p = evbuffer_pullup(input, eol);
+    debug(LOG_DEBUG, "Parsing a new request: '%.*s'", p);
 
-    ber_str2bv(line, 0, 0, &req->line);
-
-    p = line;
-    end = strchr(p, ' ');
+    end = memchr(p, ' ', eol);
     if (!end)
         return 1;
 
@@ -310,17 +310,52 @@ parse_request(struct imap_request *req, const char *line)
     ber_str2bv(p, 1, len, &req->tag);
 
     p = end + 1;
-    end = strchrnul(p, ' ');
+    eol -= len + 1;
+    to_drain += len + 1;
 
-    len = end - p;
-    ber_str2bv(p, 1, len, &req->command);
-
-    if (*end) {
-        /* Keep arguments unparsed, they are command specific */
-        p = end + 1;
-        ber_str2bv(p, 0, 0, &req->arguments);
+    end = memchr(p, ' ', eol);
+    if (!end) {
+        len = eol
+    } else {
+        len = end - p;
     }
+
+    ber_str2bv(p, 1, len, &req->command);
+    to_drain += len;
+
+    evbuffer_drain(input, to_drain);
     return 0;
+#if 0
+    struct evbuffer_ptr pos;
+    const char *p;
+    ssize_t len;
+
+    debug(LOG_DEBUG, "Parsing a new request: '%.*s'", eol, evbuffer_pullup(input, eol));
+
+    pos = evbuffer_search(input, " ", 1, NULL);
+    if (pos.pos == -1)
+        return 1;
+    len = pos.pos;
+
+    /* We also read the SP and replace it with a NUL afterwards */
+    req->tag.bv_val = p = ber_memalloc(len + 1);
+    req->tag.bv_len = len;
+    eol -= evbuffer_remove(input, p, len + 1);
+    p[len] = '\0';
+
+    pos = evbuffer_search(input, " ", 1, NULL);
+    if (pos.pos == -1)
+        len = eol;
+    else
+        len = pos.pos;
+
+    req->command.bv_val = p = ber_memalloc(len + 1);
+    req->command.bv_len = len;
+    buffer_remove(input, p, len);
+    p[len] = '\0';
+
+    return 0;
+#endif
 }
 
 static void
@@ -329,6 +364,29 @@ request_free(struct imap_request *req)
     ber_memfree(req->tag.bv_val);
     ber_memfree(req->command.bv_val);
     free(req);
+}
+
+/**
+ * Locates the EOL and drains the evbuffer up to and including the EOL string
+ *
+ * Returns:
+ * -1 iff no EOL was found
+ *  0 iff there was no data preceding the EOL
+ *  n iff there were n bytes pending before the EOL
+ */
+static int
+drain_newline(struct bufferevent *bev, enum evbuffer_eol_style eol_style)
+{
+    struct evbuffer_ptr pos;
+    struct evbuffer *input;
+    size_t eol_size;
+
+    input = bufferevent_get_input(bev);
+
+    pos = evbuffer_search_eol(input, NULL, &eol_size, eol_style);
+    if (pos.pos != -1)
+        evbuffer_drain(input, pos.pos + eol_size);
+    return pos.pos;
 }
 
 static int
@@ -377,8 +435,14 @@ imap_capability(struct imap_context *ctx, struct imap_request *req, void *priv)
     struct bufferevent *bev = ctx->client_bev;
     struct evbuffer *output = bufferevent_get_output(bev);
 
+    if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
+        evbuffer_add_printf(output, "%s BAD No arguments expected" CRLF, req->tag.bv_val);
+        return IMAP_OK;
+    }
+
     evbuffer_add_printf(output, "* CAPABILITY IMAP4rev1 STARTTLS AUTH=PLAIN LOGINDISABLED" CRLF);
     evbuffer_add_printf(output, "%s OK CAPABILITY completed" CRLF, req->tag.bv_val);
+
     return IMAP_OK;
 }
 
@@ -391,6 +455,11 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
     bufferevent_data_cb readcb, writecb;
     bufferevent_event_cb eventcb;
     void *orig_ctx;
+
+    if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
+        evbuffer_add_printf(output, "%s BAD No arguments expected" CRLF, req->tag.bv_val);
+        return IMAP_OK;
+    }
 
     if (ctx->state & IMAP_TLS) {
         evbuffer_add_printf(output, "%s BAD TLS layer already in place" CRLF, req->tag.bv_val);
@@ -433,10 +502,12 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
     if (!chain)
         goto cleanup;
 
+    chain_add(chain, imap_sp, NULL, NULL);
     chain_add(chain, imap_astring, NULL, arg);
 
     arg++;
     arg->type = ARG_LAST;
+    chain_add(chain, imap_sp, NULL, NULL);
     chain_add(chain, imap_astring, NULL, arg);
 
     chain_add(chain, imap_credential_check, NULL, ctx);
@@ -450,12 +521,31 @@ cleanup:
 }
 
 static int
+imap_sp(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    struct evbuffer *input = bufferevent_get_input(bev);
+    char *p;
+    rc = CHAIN_ERROR;
+
+    if (!evbuffer_get_length(input))
+        return CHAIN_AGAIN;
+
+    p = evbuffer_pullup(input, 1);
+    if (*p == ' ') {
+        evbuffer_drain(input, 1);
+        rc = CHAIN_DONE;
+    }
+
+    return rc;
+}
+
+static int
 imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
 {
+    struct evbuffer_ptr pos;
     imap_arg *dest = ctx;
-    char *arg, *p;
-    struct evbuffer_ptr *pos;
     int eol_pos, end_pos;
+    char *arg, *p;
 
     if ((dest->type & ARG_TYPES) == ARG_LITERAL) {
         int need = dest->arg_len - evbuffer_get_length(dest->buffer);
@@ -464,24 +554,17 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
         need -= evbuffer_remove_buffer(input, dest->buffer, need);
         assert(need >= 0);
 
-        if (need)
-            return CHAIN_AGAIN;
-        else
-            return CHAIN_DONE;
+        return need ? CHAIN_AGAIN : CHAIN_DONE;
     }
 
     pos = evbuffer_search_eol(input, NULL, NULL, EVBUFFER_EOL_CRLF);
-    if (!pos)
-        return CHAIN_ERROR;
-    eol_pos = pos->pos;
-    free(pos);
+    eol_pos = pos.pos;
 
     if (arg->type & ARG_LAST) {
         end_pos = eol_pos;
     } else {
-        pos = evbuffer_search(input, " ", 1, NULL, NULL);
-        end_pos = pos->pos;
-        free(pos);
+        pos = evbuffer_search(input, " ", 1, NULL);
+        end_pos = pos.pos;
     }
 
     arg = evbuffer_pullup(input, 1);
@@ -506,7 +589,7 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
                     }
 
                     /* find out whether it's escaped (= has an odd number of
-                     * backslashes in front of it */
+                     * backslashes in front of it) */
                     p = quote;
                     while (*(--p) == '\\')
                         escaped = !escaped;
@@ -547,47 +630,39 @@ imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
     struct user_info user_info = {};
     char *attrs[2] = { "mailhost", NULL };
     char *p, *arg;
-    ssize_t len, len_domain;
+    ssize_t len, len_domain = 0;
     int rc = CHAIN_DONE;
+
+    if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
+        evbuffer_add_printf(output, "%s BAD Invalid number of arguments" CRLF, req->tag.bv_val);
+        return rc;
+    }
 
     output = bufferevent_get_output(client_bev);
     arg = req->arguments.bv_val;
 
     len = p - arg; // length of whole "username@domain"
 
-    p = user_info.username.bv_val = malloc(len + 1);
-    memcpy(p, arg, len);
-    p[len] = '\0';
+    p = user_info.username.bv_val = evbuffer_pullup(args->arg_buf, -1);
+    len = arg->arg_len;
 
-    p = memchr(user_info.username.bv_val, '@', len);
+    p = memchr(p, '@', len);
     if (p) {
         len = p - user_info.username.bv_val;
+        len_domain = arg->arg_len - len - 1;
         p++;
     } else {
         // use a default domain
         p = ctx->driver->config->default_host;
     }
     user_info.username.bv_len = len;
-    ber_str2bv(p, 0, 0, &(user_info.domain));
+    ber_str2bv(p, len_domain, 0, &(user_info.domain));
 
     user_info.attrs = attrs;
     if (get_user_info(ctx->driver->ldap, &user_info, search_cb, ctx)) {
         evbuffer_add_printf(output, "%s NO Internal server error", req->tag.bv_val);
         rc = IMAP_SHUTDOWN;
     }
-
-    /*
-    server_bev = bufferevent_socket_new(ctx->driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
-    bufferevent_enable(server_bev, EV_READ|EV_WRITE);
-    bufferevent_socket_connect_hostname(server_bev, ctx->driver->dnsbase, AF_UNSPEC, servername, ctx->driver->config->default_port);
-    bufferevent_setcb(server_bev, NULL, NULL, server_connect_cb, ctx);
-
-    // copy over client data, CRLF in request has been skipped, so append that
-    bufferevent_write(server_bev, req->line.bv_val, req->line.bv_len);
-    bufferevent_write(server_bev, CRLF, 2);
-
-    ctx->server_bev = server_bev;
-    */
 
     /* stop reading on the connection until we're connected to server */
     bufferevent_disable(client_bev, EV_READ);
