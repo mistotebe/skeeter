@@ -560,7 +560,7 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
     pos = evbuffer_search_eol(input, NULL, NULL, EVBUFFER_EOL_CRLF);
     eol_pos = pos.pos;
 
-    if (arg->type & ARG_LAST) {
+    if (dest->arg_type & ARG_LAST) {
         end_pos = eol_pos;
     } else {
         pos = evbuffer_search(input, " ", 1, NULL);
@@ -573,7 +573,7 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
             {
                 char *quote = evbuffer_pullup(input, -1);
 
-                dest->arg_type = ARG_QUOTED;
+                dest->arg_type |= ARG_QUOTED;
                 do {
                     int escaped = 0;
 
@@ -594,24 +594,39 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
                     while (*(--p) == '\\')
                         escaped = !escaped;
                 } while (escaped);
+
+                quote++;
+                dest->arg_len = quote - start;
+                evbuffer_remove_buffer(input, dest->buffer, dest->arg_len);
             }
             break;
         case '{':
-            dest->arg_type = ARG_LITERAL;
+            dest->arg_type |= ARG_LITERAL;
 
-            /* find out how much data was requested */
+            /* find out how much data was advertised */
             p = arg + 1;
             if (!(*p > '0' && *p <= '9')) {
                 /* invalid */
+                return CHAIN_ERROR;
             }
             while (*p >= '0' && *p <= '9')
                 /* just skip over it */;
 
-            /* parse the number and set dest->arg_len */
-            /* receive the data */
+            dest->arg_len = atol(arg + 1);
+
+            if (!(*p++ == '}') || !(*p++ == '\r') || (*p++ == '\n'))
+                return CHAIN_ERROR;
+
+            evbuffer_drain(input, p - arg);
+            bufferevent_write(bev, "+ GO AHEAD" CRLF, 12);
+
+            /* can we return here? (= if there is still data on the bufferevent
+             * and the client never sends anything more, will we be called
+             * again or should we just jump to the beginning?) */
+            return CHAIN_AGAIN;
             break;
         default:
-            dest->arg_type = ARG_ATOM;
+            dest->arg_type |= ARG_ATOM;
             if (end_pos == -1)
                 return CHAIN_AGAIN;
 
@@ -619,6 +634,8 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
             evbuffer_remove_buffer(input, dest->buffer, end_pos);
             break;
     }
+
+    return CHAIN_DONE;
 }
 
 static int

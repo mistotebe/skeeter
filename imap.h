@@ -44,14 +44,7 @@ typedef enum {
 struct imap_arg {
     arg_type arg_type;
     size_t arg_len;
-    union arg_union {
-        char *value;
-        struct evbuffer *buffer;
-    } value;
-    size_t arg_full_len;
-#define arg_atom value.value
-#define arg_quoted value.value
-#define arg_buf value.buffer
+    struct evbuffer *buffer;
 
 //    STAILQ_ENTRY(imap_arg) next;
 };
