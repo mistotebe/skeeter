@@ -16,11 +16,20 @@
 #define IMAP_DONE 3
 #define IMAP_SHUTDOWN 4
 
+#define STRLENOF(x) (sizeof(x) - 1)
+
 #define CRLF "\r\n"
 
+#define BAD_ARG_NO "BAD Invalid number of arguments"
+#define LITERAL_RESPONSE "+ GO AHEAD"
+#define LITERAL_RESPONSE_LEN STRLENOF(LITERAL_RESPONSE)
+#define SERVER_ERROR "NO Internal server error"
+#define SERVER_ERROR_LEN STRLENOF(SERVER_ERROR)
 /*FIXME: these should match Cyrus messages */
 #define AUTH_FAILED_MSG "NO Authentication failed"
+#define AUTH_FAILED_MSG_LEN STRLENOF(AUTH_FAILED_MSG)
 #define AUTH_ABORTED_MSG "BAD Authentication aborted"
+#define AUTH_ABORTED_MSG_LEN STRLENOF(AUTH_ABORTED_MSG)
 
 struct imap_driver;
 struct imap_config;
@@ -81,6 +90,7 @@ struct imap_context {
     struct bufferevent *client_bev, *server_bev;
 
     imap_flags state;
+    void *priv;
 };
 
 struct imap_handler {
@@ -92,6 +102,7 @@ struct imap_handler {
 struct imap_request {
     BerValue tag;
     BerValue command;
+    void *priv;
 };
 
 int imap_handler_cmp(const void *, const void *);

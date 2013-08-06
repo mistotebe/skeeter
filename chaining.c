@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <sys/queue.h>
 #include <assert.h>
+#include <event2/event.h>
 
 struct chain_elem {
     chain_process process;

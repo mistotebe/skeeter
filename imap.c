@@ -18,6 +18,9 @@ static int imap_driver_install(struct bufferevent *, struct imap_driver *);
 
 static int parse_request(struct imap_request *, struct evbuffer *, ssize_t);
 static void request_free(struct imap_request *);
+static void arg_free(struct imap_arg *);
+static int imap_sp(struct chain *, struct bufferevent *, void *);
+static int imap_astring(struct chain *, struct bufferevent *, void *);
 
 static void trigger_listener(int, void *);
 static void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
@@ -28,6 +31,8 @@ static int imap_capability(struct imap_context *ctx, struct imap_request *req, v
 static int imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv);
 static int imap_login(struct imap_context *ctx, struct imap_request *req, void *priv);
 
+static int imap_login_cleanup(struct chain *, struct bufferevent *, int, void *);
+static int imap_credential_check(struct chain *, struct bufferevent *, void *);
 static void search_cb(LDAP *, LDAPMessage *, void *);
 
 static void proxy_cb(struct bufferevent *, void *);
@@ -299,7 +304,7 @@ parse_request(struct imap_request *req, struct evbuffer *input, ssize_t eol)
     const char *p, *end;
     ssize_t len, to_drain = 0;
 
-    p = evbuffer_pullup(input, eol);
+    p = (const char *)evbuffer_pullup(input, eol);
     debug(LOG_DEBUG, "Parsing a new request: '%.*s'", p);
 
     end = memchr(p, ' ', eol);
@@ -315,7 +320,7 @@ parse_request(struct imap_request *req, struct evbuffer *input, ssize_t eol)
 
     end = memchr(p, ' ', eol);
     if (!end) {
-        len = eol
+        len = eol;
     } else {
         len = end - p;
     }
@@ -364,6 +369,48 @@ request_free(struct imap_request *req)
     ber_memfree(req->tag.bv_val);
     ber_memfree(req->command.bv_val);
     free(req);
+}
+
+static int
+unescape_arg(BerValue *out, struct evbuffer *in)
+{
+    size_t len = evbuffer_get_length(in);
+    char *p, *q, *r;
+
+    assert(len >= 2);
+    out->bv_val = p = malloc(len);
+    if (!p)
+        return -1;
+
+    out->bv_len = evbuffer_copyout(in, p, len);
+    assert(out->bv_len == len);
+
+    /* We do not copy the quotes */
+    len -= 2;
+    q = p + 1;
+    while ((r = memchr(q, '\\', len))) {
+        ssize_t offset = r - q;
+
+        r++;
+
+        memmove(p, q, offset);
+        p += offset;
+        *p = *r;
+        p++; r++;
+        len -= offset + 2;
+
+        q = r;
+    }
+    memmove(p, q, len);
+
+    return IMAP_OK;
+}
+
+static void
+arg_free(struct imap_arg *arg)
+{
+    evbuffer_free(arg->buffer);
+    free(arg);
 }
 
 /**
@@ -436,7 +483,7 @@ imap_capability(struct imap_context *ctx, struct imap_request *req, void *priv)
     struct evbuffer *output = bufferevent_get_output(bev);
 
     if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
-        evbuffer_add_printf(output, "%s BAD No arguments expected" CRLF, req->tag.bv_val);
+        evbuffer_add_printf(output, "%s " BAD_ARG_NO CRLF, req->tag.bv_val);
         return IMAP_OK;
     }
 
@@ -457,7 +504,7 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
     void *orig_ctx;
 
     if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
-        evbuffer_add_printf(output, "%s BAD No arguments expected" CRLF, req->tag.bv_val);
+        evbuffer_add_printf(output, "%s " BAD_ARG_NO CRLF, req->tag.bv_val);
         return IMAP_OK;
     }
 
@@ -492,9 +539,11 @@ static int
 imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
 {
     struct bufferevent *client_bev = ctx->client_bev;
+    struct chain *chain = NULL;
     struct imap_arg *arg;
 
-    arg = ctx->priv = calloc(2, sizeof(imap_arg));
+    ctx->priv = req;
+    arg = req->priv = calloc(2, sizeof(struct imap_arg));
     if (!arg)
         goto cleanup;
 
@@ -506,7 +555,7 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
     chain_add(chain, imap_astring, NULL, arg);
 
     arg++;
-    arg->type = ARG_LAST;
+    arg->arg_type = ARG_LAST;
     chain_add(chain, imap_sp, NULL, NULL);
     chain_add(chain, imap_astring, NULL, arg);
 
@@ -515,40 +564,60 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
     return IMAP_DONE;
 
 cleanup:
-    free(ctx->priv);
-    chain_destroy(chain);
-    return IMAP_ERROR;
+    if (chain) {
+        chain_abort(chain, ctx->client_bev);
+    } else {
+        free(req->priv);
+    }
+    bufferevent_write(client_bev, SERVER_ERROR CRLF, SERVER_ERROR_LEN + 2);
+    return IMAP_SHUTDOWN;
+}
+
+static int
+imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void *priv)
+{
+    struct imap_context *ctx = priv;
+    struct imap_request *req = ctx->priv;
+
+    /* A libevent passed event, we don't handle any... */
+    /*FIXME: yet */
+    if (flags && !(flags & CHAIN_MASK)) {
+        return CHAIN_ERROR;
+    }
+
+    free(req->priv);
+    request_free(req);
+    return CHAIN_DONE;
 }
 
 static int
 imap_sp(struct chain *chain, struct bufferevent *bev, void *ctx)
 {
     struct evbuffer *input = bufferevent_get_input(bev);
-    char *p;
-    rc = CHAIN_ERROR;
-
-    if (!evbuffer_get_length(input))
-        return CHAIN_AGAIN;
+    const unsigned char *p;
 
     p = evbuffer_pullup(input, 1);
-    if (*p == ' ') {
+    if (!p) {
+        return CHAIN_AGAIN;
+    } else if (*p == ' ') {
         evbuffer_drain(input, 1);
-        rc = CHAIN_DONE;
+        return CHAIN_DONE;
     }
 
-    return rc;
+    return CHAIN_ERROR;
 }
 
 static int
 imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
 {
     struct evbuffer_ptr pos;
-    imap_arg *dest = ctx;
+    struct imap_arg *dest = ctx;
+    struct evbuffer *input = bufferevent_get_input(bev);
     int eol_pos, end_pos;
-    char *arg, *p;
+    const unsigned char *arg, *p;
 
-    if ((dest->type & ARG_TYPES) == ARG_LITERAL) {
-        int need = dest->arg_len - evbuffer_get_length(dest->buffer);
+    if ((dest->arg_type & ARG_TYPES) == ARG_LITERAL) {
+        ssize_t need = dest->arg_len - evbuffer_get_length(dest->buffer);
 
         /* Add as much data as possible to the buffer */
         need -= evbuffer_remove_buffer(input, dest->buffer, need);
@@ -567,12 +636,48 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
         end_pos = pos.pos;
     }
 
+    if (end_pos == -1 && eol_pos == -1)
+        return CHAIN_AGAIN;
+
     arg = evbuffer_pullup(input, 1);
     switch (*arg) {
         case '"':
             {
-                char *quote = evbuffer_pullup(input, -1);
+                /*FIXME: eol_pos might be -1 and then we want to use
+                 * evbuffer_get_length(input) instead, plus the following code
+                 * could probably be folded into a simpler do{}while() loop?
+                 */
+                const unsigned char *q, *quote = evbuffer_pullup(input, -1);
 
+                q = memchr(quote+1, '"', eol_pos);
+                if (!q) {
+                    return (eol_pos == -1) ? CHAIN_AGAIN : CHAIN_ERROR;
+                }
+
+                p = memchr(quote+1, '\\', eol_pos);
+                while (p && (p < q)) {
+                    p++;
+                    switch (*p++) {
+                        case '"':
+                            q = memchr(p, '"', eol_pos - (q - quote));
+                            if (!q)
+                                return (eol_pos == -1) ? CHAIN_AGAIN : CHAIN_ERROR;
+                            break;
+                        case '\\':
+                            break;
+                        default:
+                            return CHAIN_ERROR;
+                            break;
+                    }
+                    p = memchr(p, '\\', eol_pos - (p - quote));
+                }
+
+                q++;
+                dest->arg_len = q - arg;
+                evbuffer_remove_buffer(input, dest->buffer, dest->arg_len);
+
+#if 0
+                arg = quote;
                 dest->arg_type |= ARG_QUOTED;
                 do {
                     int escaped = 0;
@@ -596,12 +701,17 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
                 } while (escaped);
 
                 quote++;
-                dest->arg_len = quote - start;
+                dest->arg_len = quote - arg;
                 evbuffer_remove_buffer(input, dest->buffer, dest->arg_len);
+#endif
             }
             break;
         case '{':
+            if (eol_pos == -1)
+                return CHAIN_AGAIN;
+
             dest->arg_type |= ARG_LITERAL;
+            arg = evbuffer_pullup(input, eol_pos);
 
             /* find out how much data was advertised */
             p = arg + 1;
@@ -612,13 +722,13 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
             while (*p >= '0' && *p <= '9')
                 /* just skip over it */;
 
-            dest->arg_len = atol(arg + 1);
+            dest->arg_len = atol((const char *)(arg + 1));
 
             if (!(*p++ == '}') || !(*p++ == '\r') || (*p++ == '\n'))
                 return CHAIN_ERROR;
 
             evbuffer_drain(input, p - arg);
-            bufferevent_write(bev, "+ GO AHEAD" CRLF, 12);
+            bufferevent_write(bev, LITERAL_RESPONSE CRLF, LITERAL_RESPONSE_LEN + 2);
 
             /* can we return here? (= if there is still data on the bufferevent
              * and the client never sends anything more, will we be called
@@ -642,31 +752,36 @@ static int
 imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
 {
     struct imap_context *ctx = priv;
-    struct imap_arg *args = ctx->priv;
-    struct evbuffer *output;
+    struct imap_request *req = ctx->priv;
+    struct imap_arg *args = req->priv;
+    struct evbuffer *output = bufferevent_get_output(bev);
     struct user_info user_info = {};
     char *attrs[2] = { "mailhost", NULL };
-    char *p, *arg;
+    char *p;
     ssize_t len, len_domain = 0;
     int rc = CHAIN_DONE;
+    int freeit = 0;
 
     if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
-        evbuffer_add_printf(output, "%s BAD Invalid number of arguments" CRLF, req->tag.bv_val);
+        evbuffer_add_printf(output, "%s " BAD_ARG_NO CRLF, req->tag.bv_val);
         return rc;
     }
 
-    output = bufferevent_get_output(client_bev);
-    arg = req->arguments.bv_val;
+    if ((args->arg_type & ARG_TYPES) == ARG_QUOTED) {
+        unescape_arg(&user_info.username, args->buffer);
+        freeit = 1;
+    } else {
+        p = (char *)evbuffer_pullup(args->buffer, -1);
+        ber_str2bv(p, args->arg_len, 0, &user_info.username);
+    }
 
-    len = p - arg; // length of whole "username@domain"
-
-    p = user_info.username.bv_val = evbuffer_pullup(args->arg_buf, -1);
-    len = arg->arg_len;
+    len = user_info.username.bv_len; // length of whole "username@domain"
+    p = user_info.username.bv_val;
 
     p = memchr(p, '@', len);
     if (p) {
         len = p - user_info.username.bv_val;
-        len_domain = arg->arg_len - len - 1;
+        len_domain = user_info.username.bv_len - len - 1;
         p++;
     } else {
         // use a default domain
@@ -677,13 +792,19 @@ imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
 
     user_info.attrs = attrs;
     if (get_user_info(ctx->driver->ldap, &user_info, search_cb, ctx)) {
-        evbuffer_add_printf(output, "%s NO Internal server error", req->tag.bv_val);
+        evbuffer_add_printf(output, "%s " SERVER_ERROR CRLF, req->tag.bv_val);
         rc = IMAP_SHUTDOWN;
     }
 
     /* stop reading on the connection until we're connected to server */
-    bufferevent_disable(client_bev, EV_READ);
+    bufferevent_disable(bev, EV_READ);
 
+    arg_free(args);
+    arg_free(args+1);
+    free(args);
+    request_free(req);
+    if (freeit)
+        free(user_info.username.bv_val);
     return rc;
 }
 
@@ -691,6 +812,7 @@ static void
 search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
 {
     struct imap_context *ctx = priv;
+    struct imap_request *req = ctx->priv;
     struct bufferevent *server_bev;
     struct evbuffer *out;
     BerValue **servername = NULL;
@@ -702,8 +824,8 @@ search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
 
     // user not provisioned
     if (!servername || !*servername) {
-        /*FIXME: need the full request to have somethng to send */
-        evbuffer_add_printf(out, "some_tag " AUTH_FAILED_MSG CRLF);
+        evbuffer_add(out, req->tag.bv_val, req->tag.bv_len);
+        evbuffer_add(out, " " AUTH_FAILED_MSG CRLF, 1 + AUTH_FAILED_MSG_LEN + 2);
         bufferevent_enable(ctx->client_bev, EV_READ);
         return;
     }
@@ -720,6 +842,7 @@ search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
     */
 
     ctx->server_bev = server_bev;
+
     ldap_value_free_len(servername);
 }
 
@@ -738,6 +861,9 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
     } else if (events & BEV_EVENT_TIMEOUT) {
         skeeter_log(LOG_NOTICE, "Got a timeout on %s, closing connection.", (events & BEV_EVENT_READING) ? "reading" : "writing");
     } else if (events & BEV_EVENT_CONNECTED) {
+        struct imap_request *req = ctx->priv;
+        request_free(req);
+
         skeeter_log(LOG_NOTICE, "Looks like we are connected, proxying...");
         bufferevent_setcb(ctx->server_bev, proxy_cb, NULL, server_connect_cb, ctx);
         bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, server_connect_cb, ctx);
