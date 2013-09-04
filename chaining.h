@@ -9,11 +9,12 @@
 #endif
 
 typedef enum {
+    CHAIN_EVENT_MASK = (unsigned short)~0,
     CHAIN_DONE,
     CHAIN_ERROR,
     CHAIN_ABORT,
     CHAIN_AGAIN,
-    CHAIN_MASK = 0xff * (SHRT_MAX + 1),
+    CHAIN_MASK = 0xff * CHAIN_DONE,
 } chain_result;
 
 struct chain;
@@ -26,6 +27,5 @@ struct chain *chain_new(chain_except, void *);
 int chain_activate(struct chain *, struct bufferevent *, short);
 void chain_run(struct bufferevent *, void *);
 void chain_abort(struct chain *, struct bufferevent *);
-void chain_destroy(struct chain *);
 
 #endif /* _CHAINING_H */

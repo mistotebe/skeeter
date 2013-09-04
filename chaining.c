@@ -19,7 +19,8 @@ struct chain {
     void *ctx;
 };
 
-void chain_event(struct bufferevent *, short, void *);
+static void chain_event(struct bufferevent *, short, void *);
+static void chain_event_int(struct bufferevent *, int, void *);
 
 int
 chain_add(struct chain *chain, chain_process process, chain_except event, void *ctx)
@@ -60,18 +61,22 @@ chain_new(chain_except event, void *ctx)
 }
 
 int
-chain_activate(struct chain *chain, struct bufferevent *bev, short flags)
+chain_activate(struct chain *chain, struct bufferevent *bev, short iotype)
 {
     bufferevent_data_cb read_cb;
     bufferevent_data_cb write_cb;
 
     assert(chain && bev);
 
-    read_cb = (flags & EV_READ) ? chain_run : NULL;
-    write_cb = (flags & EV_WRITE) ? chain_run : NULL;
+    read_cb = (iotype & EV_READ) ? chain_run : NULL;
+    write_cb = (iotype & EV_WRITE) ? chain_run : NULL;
 
     chain->current = STAILQ_FIRST(&chain->elems);
     bufferevent_setcb(bev, read_cb, write_cb, chain_event, chain);
+
+    /* we'd be stuck indefinitely until there was a new event on bev, so run
+     * now */
+    bufferevent_trigger(bev, iotype, BEV_OPT_DEFER_CALLBACKS);
 
     return CHAIN_DONE;
 }
@@ -98,11 +103,17 @@ chain_run(struct bufferevent *bev, void *ctx)
     }
 
     /* Error */
-    chain_event(bev, rc, ctx);
+    chain_event_int(bev, rc, ctx);
 }
 
-void
+static void
 chain_event(struct bufferevent *bev, short events, void *ctx)
+{
+    chain_event_int(bev, events, ctx);
+}
+
+static void
+chain_event_int(struct bufferevent *bev, int events, void *ctx)
 {
     struct chain *chain = ctx;
     int rc;

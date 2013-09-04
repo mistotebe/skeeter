@@ -21,6 +21,8 @@
 #define CRLF "\r\n"
 
 #define BAD_ARG_NO "BAD Invalid number of arguments"
+#define BAD_INVALID "BAD Invalid request"
+#define BAD_INVALID_LEN STRLENOF(BAD_INVALID)
 #define LITERAL_RESPONSE "+ GO AHEAD"
 #define LITERAL_RESPONSE_LEN STRLENOF(LITERAL_RESPONSE)
 #define SERVER_ERROR "NO Internal server error"

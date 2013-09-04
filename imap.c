@@ -181,6 +181,8 @@ imap_driver_init(struct module *module, struct event_base *base)
         return 1;
     }
 
+    skeeter_log(LOG_NOTICE, "Binding to %s", config->listen);
+
     /* we start in disabled state until the LDAP interface is ready */
     driver->listener = evconnlistener_new_bind(base, listen_cb, (void*)driver,
             LEV_OPT_REUSEABLE|LEV_OPT_DISABLED|LEV_OPT_CLOSE_ON_FREE,
@@ -279,11 +281,16 @@ conn_readcb(struct bufferevent *bev, void *user_data)
 
         if (parse_request(req, input, pos.pos)) {
             skeeter_log(LOG_NOTICE, "invalid request");
+            bufferevent_write(bev, "* " BAD_INVALID CRLF, 2 + BAD_INVALID_LEN + 2);
+            evbuffer_drain(input, pos.pos + 2);
             goto cleanup;
         }
 
         rc = imap_handle_request(driver_ctx, req);
         skeeter_log(LOG_INFO, "Request handled, result=%d", rc);
+
+        if (rc == IMAP_DONE)
+            return;
 
 cleanup:
         request_free(req);
@@ -312,7 +319,7 @@ parse_request(struct imap_request *req, struct evbuffer *input, ssize_t eol)
         return 1;
 
     len = end - p;
-    ber_str2bv(p, 1, len, &req->tag);
+    ber_str2bv(p, len, 1, &req->tag);
 
     p = end + 1;
     eol -= len + 1;
@@ -325,7 +332,10 @@ parse_request(struct imap_request *req, struct evbuffer *input, ssize_t eol)
         len = end - p;
     }
 
-    ber_str2bv(p, 1, len, &req->command);
+    if (!len)
+        return 1;
+
+    ber_str2bv(p, len, 1, &req->command);
     to_drain += len;
 
     evbuffer_drain(input, to_drain);
@@ -446,7 +456,7 @@ imap_driver_install(struct bufferevent *bev, struct imap_driver *driver)
     ctx->driver = driver;
     ctx->client_bev = bev;
 
-    tval.tv_sec = 10;
+    tval.tv_sec = 60;
     tval.tv_usec = 0;
 
     bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
@@ -465,7 +475,7 @@ imap_handle_request(struct imap_context *ctx, struct imap_request *req)
 
     if (handler == NULL) {
         skeeter_log(LOG_NOTICE, "No handler defined for command '%s'", req->command.bv_val);
-        evbuffer_add_printf(output, "%s BAD Command %s unrecognized" CRLF, req->tag.bv_val, req->command.bv_val);
+        evbuffer_add_printf(output, "%s BAD Command %.*s unrecognized" CRLF, req->tag.bv_val, (int)req->command.bv_len, req->command.bv_val);
         return IMAP_OK;
     }
 
@@ -560,6 +570,7 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
     chain_add(chain, imap_astring, NULL, arg);
 
     chain_add(chain, imap_credential_check, NULL, ctx);
+
     chain_activate(chain, ctx->client_bev, EV_READ);
     return IMAP_DONE;
 
@@ -576,18 +587,19 @@ cleanup:
 static int
 imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void *priv)
 {
-    struct imap_context *ctx = priv;
-    struct imap_request *req = ctx->priv;
-
-    /* A libevent passed event, we don't handle any... */
-    /*FIXME: yet */
+    /* A libevent passed event, forward to the original handler */
     if (flags && !(flags & CHAIN_MASK)) {
-        return CHAIN_ERROR;
+        conn_eventcb(bev, flags, priv);
+    } else if (flags == CHAIN_ABORT) {
+        struct imap_context *ctx = priv;
+        struct imap_request *req = ctx->priv;
+
+        free(req->priv);
+        request_free(req);
+        bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
     }
 
-    free(req->priv);
-    request_free(req);
-    return CHAIN_DONE;
+    return flags;
 }
 
 static int
