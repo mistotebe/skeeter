@@ -18,7 +18,6 @@ static int imap_driver_install(struct bufferevent *, struct imap_driver *);
 
 static int parse_request(struct imap_request *, struct evbuffer *, ssize_t);
 static void request_free(struct imap_request *);
-static void arg_free(struct imap_arg *);
 static int imap_sp(struct chain *, struct bufferevent *, void *);
 static int imap_astring(struct chain *, struct bufferevent *, void *);
 
@@ -202,7 +201,7 @@ imap_driver_init(struct module *module, struct event_base *base)
     }
 
     if (ldap->register_event(ldap, MODULE_ANY | MODULE_PERSIST, trigger_listener, driver->listener)) {
-        skeeter_log(LOG_CRIT, "Regitration with LDAP module failed!");
+        skeeter_log(LOG_CRIT, "Registration with LDAP module failed!");
         return 1;
     }
 
@@ -312,7 +311,7 @@ parse_request(struct imap_request *req, struct evbuffer *input, ssize_t eol)
     ssize_t len, to_drain = 0;
 
     p = (const char *)evbuffer_pullup(input, eol);
-    debug(LOG_DEBUG, "Parsing a new request: '%.*s'", p);
+    debug(LOG_DEBUG, "Parsing a new request: '%.*s'", eol, p);
 
     end = memchr(p, ' ', eol);
     if (!end)
@@ -414,13 +413,6 @@ unescape_arg(BerValue *out, struct evbuffer *in)
     memmove(p, q, len);
 
     return IMAP_OK;
-}
-
-static void
-arg_free(struct imap_arg *arg)
-{
-    evbuffer_free(arg->buffer);
-    free(arg);
 }
 
 /**
@@ -576,7 +568,7 @@ imap_login(struct imap_context *ctx, struct imap_request *req, void *priv)
 
 cleanup:
     if (chain) {
-        chain_abort(chain, ctx->client_bev);
+        chain_destroy(chain, ctx->client_bev, CHAIN_ABORT);
     } else {
         free(req->priv);
     }
@@ -587,17 +579,34 @@ cleanup:
 static int
 imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void *priv)
 {
+    struct imap_context *ctx = priv;
+    struct imap_request *req = ctx->priv;
+    struct imap_arg *args = req->priv;
+    struct evbuffer *out;
+
     /* A libevent passed event, forward to the original handler */
     if (flags && !(flags & CHAIN_MASK)) {
+        /*FIXME needs a rethought */
         conn_eventcb(bev, flags, priv);
-    } else if (flags == CHAIN_ABORT) {
-        struct imap_context *ctx = priv;
-        struct imap_request *req = ctx->priv;
-
-        free(req->priv);
-        request_free(req);
-        bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
+        return flags;
     }
+
+    bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
+
+    if (flags == CHAIN_DONE)
+        return flags;
+
+    out = bufferevent_get_output(bev);
+    /*FIXME If there's a true error on our side (like LDAP), need to cause a
+     * shutdown instead */
+    evbuffer_add(out, req->tag.bv_val, req->tag.bv_len);
+    evbuffer_add(out, " " BAD_INVALID CRLF, 1 + BAD_INVALID_LEN + 2);
+
+    if (args[0].buffer) evbuffer_free(args[0].buffer);
+    if (args[1].buffer) evbuffer_free(args[1].buffer);
+    free(args);
+
+    request_free(req);
 
     return flags;
 }
@@ -629,6 +638,7 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
     const unsigned char *arg, *p;
 
     if ((dest->arg_type & ARG_TYPES) == ARG_LITERAL) {
+drain:;
         ssize_t need = dest->arg_len - evbuffer_get_length(dest->buffer);
 
         /* Add as much data as possible to the buffer */
@@ -684,6 +694,8 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
                     p = memchr(p, '\\', eol_pos - (p - quote));
                 }
 
+                dest->buffer = evbuffer_new();
+
                 q++;
                 dest->arg_len = q - arg;
                 evbuffer_remove_buffer(input, dest->buffer, dest->arg_len);
@@ -732,25 +744,30 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
                 return CHAIN_ERROR;
             }
             while (*p >= '0' && *p <= '9')
-                /* just skip over it */;
+                p++; /* just skip over it */
 
             dest->arg_len = atol((const char *)(arg + 1));
 
-            if (!(*p++ == '}') || !(*p++ == '\r') || (*p++ == '\n'))
+            if (!(*p++ == '}') || !(*p++ == '\r') || !(*p++ == '\n'))
                 return CHAIN_ERROR;
+
+            dest->buffer = evbuffer_new();
 
             evbuffer_drain(input, p - arg);
             bufferevent_write(bev, LITERAL_RESPONSE CRLF, LITERAL_RESPONSE_LEN + 2);
 
-            /* can we return here? (= if there is still data on the bufferevent
+            /*XXX can we return here? (= if there is still data on the bufferevent
              * and the client never sends anything more, will we be called
              * again or should we just jump to the beginning?) */
-            return CHAIN_AGAIN;
+            /* we will not be called again -> jump */
+            goto drain;
             break;
         default:
             dest->arg_type |= ARG_ATOM;
             if (end_pos == -1)
                 return CHAIN_AGAIN;
+
+            dest->buffer = evbuffer_new();
 
             dest->arg_len = end_pos;
             evbuffer_remove_buffer(input, dest->buffer, end_pos);
@@ -804,6 +821,7 @@ imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
 
     user_info.attrs = attrs;
     if (get_user_info(ctx->driver->ldap, &user_info, search_cb, ctx)) {
+        /*FIXME */
         evbuffer_add_printf(output, "%s " SERVER_ERROR CRLF, req->tag.bv_val);
         rc = IMAP_SHUTDOWN;
     }
@@ -811,10 +829,6 @@ imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
     /* stop reading on the connection until we're connected to server */
     bufferevent_disable(bev, EV_READ);
 
-    arg_free(args);
-    arg_free(args+1);
-    free(args);
-    request_free(req);
     if (freeit)
         free(user_info.username.bv_val);
     return rc;

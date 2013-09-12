@@ -101,6 +101,10 @@ chain_run(struct bufferevent *bev, void *ctx)
         /* We need more data */
         return;
     }
+    if (rc == CHAIN_DONE) {
+        chain_destroy(chain, bev, CHAIN_DONE);
+        return;
+    }
 
     /* Error */
     chain_event_int(bev, rc, ctx);
@@ -138,11 +142,11 @@ chain_event_int(struct bufferevent *bev, int events, void *ctx)
         }
     }
 
-    chain_abort(chain, bev);
+    chain_destroy(chain, bev, CHAIN_ABORT);
 }
 
 void
-chain_abort(struct chain *chain, struct bufferevent *bev)
+chain_destroy(struct chain *chain, struct bufferevent *bev, int events)
 {
     struct chain_elem *elem;
 
@@ -151,13 +155,13 @@ chain_abort(struct chain *chain, struct bufferevent *bev)
     while (!STAILQ_EMPTY(&chain->elems)) {
         elem = STAILQ_FIRST(&chain->elems);
         if (elem->event)
-            elem->event(chain, bev, CHAIN_ABORT, elem->ctx);
+            elem->event(chain, bev, events, elem->ctx);
 
         STAILQ_REMOVE_HEAD(&chain->elems, next);
         free(elem);
     }
 
     if (chain->event)
-        chain->event(chain, bev, CHAIN_ABORT, chain->ctx);
+        chain->event(chain, bev, events, chain->ctx);
     free(chain);
 }

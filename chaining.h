@@ -26,6 +26,6 @@ int chain_add(struct chain *, chain_process, chain_except, void *);
 struct chain *chain_new(chain_except, void *);
 int chain_activate(struct chain *, struct bufferevent *, short);
 void chain_run(struct bufferevent *, void *);
-void chain_abort(struct chain *, struct bufferevent *);
+void chain_destroy(struct chain *, struct bufferevent *, int);
 
 #endif /* _CHAINING_H */
