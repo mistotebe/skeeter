@@ -842,6 +842,8 @@ search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
     struct bufferevent *server_bev;
     struct evbuffer *out;
     BerValue **servername = NULL;
+    char *p;
+    int port = 0;
 
     out = bufferevent_get_output(ctx->client_bev);
     if (msg) {
@@ -856,9 +858,18 @@ search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
         return;
     }
 
+    p = memchr(servername[0]->bv_val, ':', servername[0]->bv_len);
+    if (p && (p < (servername[0]->bv_val + servername[0]->bv_len))) {
+        //FIXME: do a proper checking, using atoi on a buffer is just asking for an overflow
+        *p = '\0';
+        port = atoi(p+1);
+    }
+    if (!port)
+        port = ctx->driver->config->default_port;
+
     server_bev = bufferevent_socket_new(ctx->driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(server_bev, EV_READ|EV_WRITE);
-    bufferevent_socket_connect_hostname(server_bev, ctx->driver->dnsbase, AF_UNSPEC, servername[0]->bv_val, ctx->driver->config->default_port);
+    bufferevent_socket_connect_hostname(server_bev, ctx->driver->dnsbase, AF_UNSPEC, servername[0]->bv_val, port);
     bufferevent_setcb(server_bev, NULL, NULL, server_connect_cb, ctx);
 
     /*
