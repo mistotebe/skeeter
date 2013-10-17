@@ -698,6 +698,7 @@ drain:;
 
                 q++;
                 dest->arg_len = q - arg;
+                dest->arg_type |= ARG_QUOTED;
                 evbuffer_remove_buffer(input, dest->buffer, dest->arg_len);
 
 #if 0
