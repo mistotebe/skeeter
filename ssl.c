@@ -9,7 +9,7 @@ int
 init_ssl(void)
 {
     if (ssl_initialized)
-        return 0;
+        return !RAND_poll();
     ssl_initialized = 1;
 
     /* Initialize the OpenSSL library */
