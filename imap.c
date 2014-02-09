@@ -951,6 +951,176 @@ drain:;
 }
 
 static int
+imap_await_greeting(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    /* TODO */
+    return CHAIN_ERROR;
+}
+
+static int
+imap_put_login(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    BerValue *tag = ctx;
+    bufferevent_write(bev, tag->bv_val, tag->bv_len);
+    bufferevent_write(bev, " LOGIN", 6);
+
+    return CHAIN_DONE;
+}
+
+static int
+imap_await_goahead(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    struct evbuffer *input = bufferevent_get_input(bev);
+    const unsigned char *p;
+
+    debug(LOG_DEBUG, "imap_await_goahead");
+    p = evbuffer_pullup(input, 3);
+    if (!p) {
+        return CHAIN_AGAIN;
+    } else if (*p++ == '+' && *p == ' ') {
+        int pos = drain_newline(bev, EVBUFFER_EOL_CRLF);
+        if (pos == -1)
+            return CHAIN_AGAIN;
+        if (pos > 2)
+            return CHAIN_DONE;
+    }
+
+    return CHAIN_ERROR;
+}
+
+static int
+imap_put_literal_header(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    struct imap_arg *arg = ctx;
+    struct evbuffer *output = bufferevent_get_output(bev);
+
+    assert(ARG_TYPE(arg->arg_type) == ARG_LITERAL);
+    evbuffer_add_printf(output, " {%zu}" CRLF, arg->arg_len);
+    return CHAIN_DONE;
+}
+
+static int
+imap_put_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    struct imap_arg *arg = ctx;
+
+    if (ARG_TYPE(arg->arg_type) != ARG_LITERAL)
+        bufferevent_write(bev, " ", 1);
+
+    /* this is destructive, but we have used what we needed */
+    return bufferevent_write_buffer(bev, arg->buffer);
+}
+
+static int
+imap_put_crlf(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    bufferevent_write(bev, CRLF, 2);
+    return CHAIN_DONE;
+}
+
+static int
+imap_await_tag(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    struct evbuffer_ptr pos;
+    struct evbuffer *input = bufferevent_get_input(bev);
+    BerValue *tag = ctx;
+    char *p = NULL;
+
+    pos = evbuffer_search(input, " ", 1, NULL);
+    if (pos.pos == -1) {
+        if (evbuffer_get_length(input) > tag->bv_len)
+            return CHAIN_ERROR;
+
+        pos = evbuffer_search_eol(input, NULL, NULL, EVBUFFER_EOL_CRLF);
+        if (pos.pos != -1)
+            return CHAIN_ERROR;
+
+        return CHAIN_AGAIN;
+    }
+
+    if (pos.pos > tag->bv_len)
+        return CHAIN_ERROR;
+
+    if (pos.pos != tag->bv_len && pos.pos == 1) {
+        /* Check for an unsolicited message before we reject it */
+        p = (char *)evbuffer_pullup(input, 2);
+        if (memcmp(p, "* ", 2)) {
+            /* FIXME: a different code and handling routine, but for now,
+             * unsolicited means error */
+            return CHAIN_ERROR;
+        }
+    }
+
+    if (pos.pos != tag->bv_len)
+        return CHAIN_ERROR;
+
+    p = (char *)evbuffer_pullup(input, pos.pos + 1);
+    assert(p);
+
+    if (memcmp(p, tag->bv_val, tag->bv_len) == 0) {
+        evbuffer_drain(input, pos.pos + 1);
+        return CHAIN_DONE;
+    }
+
+    return CHAIN_ERROR;
+}
+
+static int
+imap_await_result(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    struct evbuffer_ptr pos;
+    struct evbuffer *input = bufferevent_get_input(bev);
+    char *p;
+
+    pos = evbuffer_search(input, " ", 1, NULL);
+    if (pos.pos == -1) {
+        pos = evbuffer_search_eol(input, NULL, NULL, EVBUFFER_EOL_CRLF);
+        if (pos.pos == -1)
+            return CHAIN_AGAIN;
+    }
+
+    p = (char *)evbuffer_pullup(input, pos.pos);
+    assert(p);
+
+    if (memcmp(p, "OK", 2) == 0)
+        return CHAIN_DONE;
+
+    return CHAIN_ERROR;
+}
+
+static int
+imap_server_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void *priv)
+{
+    struct imap_context *ctx = priv;
+    struct imap_request *req = ctx->priv;
+    struct imap_arg *args = req->priv;
+
+    /* Hello, this code is not supposed to work at all, please tell me if you
+     * read this (at least it does not prevent compilation now :)) */
+    /* A libevent passed event, forward to the original handler */
+    if ((short)flags) {
+        /*FIXME needs a rethought */
+        conn_eventcb(bev, flags, priv);
+        return flags;
+    }
+
+    if (flags == CHAIN_DONE) {
+        /* proxy_cb will copy the contents of the buffer to the client */
+        bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
+
+        return flags;
+    }
+
+    if (args[0].buffer) evbuffer_free(args[0].buffer);
+    if (args[1].buffer) evbuffer_free(args[1].buffer);
+    free(args);
+
+    request_free(req);
+
+    return flags;
+}
+
+static int
 imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
 {
     struct imap_context *ctx = priv;
@@ -1060,8 +1230,7 @@ static void
 server_connect_cb(struct bufferevent *bev, short events, void *priv)
 {
     struct imap_context *ctx = priv;
-    // temporarily disable, until error_cb is ready
-    //assert(bev == ctx->server_bev);
+    assert(bev == ctx->server_bev);
 
     if (events & BEV_EVENT_EOF) {
         skeeter_log(LOG_NOTICE, "Connection closed.");
@@ -1072,19 +1241,73 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
         skeeter_log(LOG_NOTICE, "Got a timeout on %s, closing connection.", (events & BEV_EVENT_READING) ? "reading" : "writing");
     } else if (events & BEV_EVENT_CONNECTED) {
         struct imap_request *req = ctx->priv;
-        request_free(req);
+        struct imap_arg *args = req->priv;
+        struct chain *chain = NULL;
 
-        skeeter_log(LOG_NOTICE, "Looks like we are connected, proxying...");
-        bufferevent_setcb(ctx->server_bev, proxy_cb, NULL, server_connect_cb, ctx);
-        bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, server_connect_cb, ctx);
-        bufferevent_enable(ctx->client_bev, EV_READ);
+        skeeter_log(LOG_NOTICE, "Looks like we are connected, initiating server hanshake...");
+        chain = chain_new(imap_server_cleanup, ctx);
+        if (!chain)
+            goto cleanup;
+
+        chain_add(chain, imap_await_greeting, NULL, NULL);
+        /* TODO: insert a STARTTLS attempt here, IIUC it should not interfere
+         * with chaining as it is designed, but needs a side channel to
+         * communicate a "NO" properly.
+         *
+         * chain_add(chain, imap_put_starttls, NULL, NULL);
+         * chain_add(chain, imap_await_tag, NULL, tag);
+         * chain_add(chain, imap_await_result, handle_no, &tls_approved_by_server);
+         * chain_add(chain, imap_tls_layer, imap_tls_done, &tls_approved_by_server);
+         */
+        chain_add(chain, imap_put_login, NULL, &req->tag);
+
+        if (ARG_TYPE(args->arg_type) == ARG_LITERAL) {
+            chain_add(chain, imap_put_literal_header, NULL, args);
+            chain_add(chain, imap_await_goahead, NULL, NULL);
+        }
+        chain_add(chain, imap_put_astring, NULL, args);
+
+        args++;
+        if (ARG_TYPE(args->arg_type) == ARG_LITERAL) {
+            chain_add(chain, imap_put_literal_header, NULL, args);
+            chain_add(chain, imap_await_goahead, NULL, NULL);
+        }
+        chain_add(chain, imap_put_astring, NULL, args);
+
+        chain_add(chain, imap_put_crlf, NULL, NULL);
+
+        chain_add(chain, imap_await_tag, NULL, &req->tag);
+        chain_add(chain, imap_await_result, NULL, NULL);
+
+        chain_activate(chain, bev, EV_READ|EV_WRITE);
         return;
+    }
+cleanup:
+    skeeter_log(LOG_INFO, "Freeing connection data");
+    bufferevent_free(ctx->server_bev);
+    bufferevent_free(ctx->client_bev);
+    free(ctx);
+}
+
+static void
+server_error_cb(struct bufferevent *bev, short events, void *priv)
+{
+    struct imap_context *ctx = priv;
+
+    if (events & BEV_EVENT_EOF) {
+        skeeter_log(LOG_NOTICE, "Connection closed.");
+    } else if (events & BEV_EVENT_ERROR) {
+        skeeter_log(LOG_WARNING, "Got an error on the connection: %s",
+                strerror(errno));
+    } else if (events & BEV_EVENT_TIMEOUT) {
+        skeeter_log(LOG_NOTICE, "Got a timeout on %s, closing connection.", (events & BEV_EVENT_READING) ? "reading" : "writing");
     }
     skeeter_log(LOG_INFO, "Freeing connection data");
     bufferevent_free(ctx->server_bev);
     bufferevent_free(ctx->client_bev);
     free(ctx);
 }
+
 
 static void
 proxy_cb(struct bufferevent *source, void *priv)
