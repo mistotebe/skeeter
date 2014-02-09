@@ -769,11 +769,10 @@ imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void
     if (flags == CHAIN_DONE)
         return flags;
 
-    out = bufferevent_get_output(bev);
     /*FIXME If there's a true error on our side (like LDAP), need to cause a
      * shutdown instead */
-    evbuffer_add(out, req->tag.bv_val, req->tag.bv_len);
-    evbuffer_add(out, " " BAD_INVALID CRLF, 1 + BAD_INVALID_LEN + 2);
+    bufferevent_write(bev, req->tag.bv_val, req->tag.bv_len);
+    bufferevent_write(bev, " " BAD_INVALID CRLF, 1 + BAD_INVALID_LEN + 2);
 
     if (args[0].buffer) evbuffer_free(args[0].buffer);
     if (args[1].buffer) evbuffer_free(args[1].buffer);
@@ -1026,8 +1025,8 @@ search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
 
     // user not provisioned
     if (!servername || !*servername) {
-        evbuffer_add(out, req->tag.bv_val, req->tag.bv_len);
-        evbuffer_add(out, " " AUTH_FAILED_MSG CRLF, 1 + AUTH_FAILED_MSG_LEN + 2);
+        bufferevent_write(ctx->client_bev, req->tag.bv_val, req->tag.bv_len);
+        bufferevent_write(ctx->client_bev, " " AUTH_FAILED_MSG CRLF, 1 + AUTH_FAILED_MSG_LEN + 2);
         bufferevent_enable(ctx->client_bev, EV_READ);
         return;
     }
