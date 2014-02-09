@@ -49,6 +49,7 @@ typedef enum {
     ARG_LITERAL,
     ARG_BINARY, /* unimplemented */
     ARG_TYPES = 0xff,
+#define ARG_TYPE(x) ((x) & ARG_TYPES)
     ARG_LAST = 0x100,
 } arg_type;
 

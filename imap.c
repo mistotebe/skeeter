@@ -637,7 +637,7 @@ imap_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
     int eol_pos, end_pos;
     const unsigned char *arg, *p;
 
-    if ((dest->arg_type & ARG_TYPES) == ARG_LITERAL) {
+    if (ARG_TYPE(dest->arg_type) == ARG_LITERAL) {
 drain:;
         ssize_t need = dest->arg_len - evbuffer_get_length(dest->buffer);
 
@@ -797,7 +797,7 @@ imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
         return rc;
     }
 
-    if ((args->arg_type & ARG_TYPES) == ARG_QUOTED) {
+    if (ARG_TYPE(args->arg_type) == ARG_QUOTED) {
         unescape_arg(&user_info.username, args->buffer);
         freeit = 1;
     } else {
