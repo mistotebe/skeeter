@@ -15,6 +15,8 @@
 #include <ldap.h>
 
 static int imap_driver_install(struct bufferevent *, struct imap_driver *);
+static int imap_handler_tls_init(struct imap_driver *, struct imap_handler *);
+static int imap_handler_capability_init(struct imap_driver *, struct imap_handler *);
 
 static int parse_request(struct imap_request *, struct evbuffer *, ssize_t);
 static void request_free(struct imap_request *);
@@ -38,8 +40,8 @@ static void proxy_cb(struct bufferevent *, void *);
 static void server_connect_cb(struct bufferevent *, short, void *);
 
 static struct imap_handler handlers[] = {
-    { "STARTTLS", imap_starttls }, // will not be registered by default
-    { "CAPABILITY", imap_capability },
+    { "STARTTLS", imap_starttls, imap_handler_tls_init },
+    { "CAPABILITY", imap_capability, imap_handler_capability_init },
     { "LOGIN", imap_login },
     /*
     { "NOOP", imap_noop },
@@ -49,10 +51,19 @@ static struct imap_handler handlers[] = {
     { NULL }
 };
 
+static char *capability_common_default[] = { "IMAP4rev1", NULL };
+static char *capability_plain_default[] = { "LOGINDISABLED", NULL };
+static char *capability_tls_default[] = { NULL };
+
 static struct imap_config config_default = {
     .listen = "127.0.0.1:1143",
     .default_host = "localhost",
-    .default_port = 143
+    .default_port = 143,
+    .capability = {
+        .common = capability_common_default,
+        .plain = capability_plain_default,
+        .tls = capability_tls_default,
+    },
 };
 
 struct module imap_module = {
@@ -133,6 +144,59 @@ imap_driver_config(struct module *module, config_setting_t *conf)
         conf_get_string(config->pkey, value);
     }
 
+    setting = config_setting_get_member(conf, "capability");
+    if (setting != NULL) {
+        int i, len;
+
+        value = config_setting_get_member(setting, "common");
+        if (value) {
+            if (!config_setting_is_aggregate(value))
+                return 1;
+
+            len = config_setting_length(value);
+            config->capability.common = calloc(len + 1, sizeof(char *));
+            if (config->capability.common == NULL)
+                return 1;
+
+            for (i = 0; i < len; i++) {
+                conf_get_string(config->capability.common[i],
+                                config_setting_get_elem(value, i));
+            }
+        }
+
+        value = config_setting_get_member(setting, "plain");
+        if (value) {
+            if (!config_setting_is_aggregate(value))
+                return 1;
+
+            len = config_setting_length(value);
+            config->capability.plain = calloc(len + 1, sizeof(char *));
+            if (config->capability.plain == NULL)
+                return 1;
+
+            for (i = 0; i < len; i++) {
+                conf_get_string(config->capability.plain[i],
+                                config_setting_get_elem(value, i));
+            }
+        }
+
+        value = config_setting_get_member(setting, "tls");
+        if (value) {
+            if (!config_setting_is_aggregate(value))
+                return 1;
+
+            len = config_setting_length(value);
+            config->capability.tls = calloc(len + 1, sizeof(char *));
+            if (config->capability.tls == NULL)
+                return 1;
+
+            for (i = 0; i < len; i++) {
+                conf_get_string(config->capability.tls[i],
+                                config_setting_get_elem(value, i));
+            }
+        }
+    }
+
     driver = calloc(1, sizeof(struct imap_driver));
     if (driver == NULL)
         return 1;
@@ -164,13 +228,21 @@ imap_driver_init(struct module *module, struct event_base *base)
         if (driver->ssl_ctx == NULL) {
             return 1;
         }
-    } else {
-        /* skip the STARTTLS handler */
-        handler += 1;
     }
 
     for (; handler->command; handler++) {
-        /* handle the private handler storage */
+        int rc = IMAP_HANDLER_OK;
+
+        if (handler->init)
+            rc = handler->init(driver, handler);
+
+        if (rc == IMAP_HANDLER_SKIP)
+            continue;
+        if (rc) {
+            skeeter_log(LOG_CRIT, "Handler '%s' failed initialization: %d", handler->command, rc);
+            return 1;
+        }
+
         if (avl_insert(&driver->commands, handler, imap_handler_cmp, avl_dup_error)) {
             return 1;
         }
@@ -210,6 +282,99 @@ imap_driver_init(struct module *module, struct event_base *base)
     return 0;
 }
 
+static int
+imap_handler_tls_init(struct imap_driver *driver, struct imap_handler *handler)
+{
+    return (driver->ssl_ctx) ? IMAP_HANDLER_OK : IMAP_HANDLER_SKIP;
+}
+
+static int
+imap_handler_capability_init(struct imap_driver *driver, struct imap_handler *handler)
+{
+    BerValue *capability_strings;
+    char **conf, *fragment;
+    size_t len;
+
+    capability_strings = calloc(3, sizeof(BerValue));
+    if (!capability_strings)
+        return IMAP_HANDLER_ERROR;
+
+    /* "* CAPABILITY" + imap->capability->common */
+    len = CAPABILITY_PREFIX_LEN;
+    for (conf = driver->config->capability.common; *conf; conf++)
+        len += 1 + strlen(*conf);
+
+    fragment = malloc(len);
+    if (fragment == NULL)
+        return IMAP_HANDLER_ERROR;
+
+    capability_strings[0].bv_val = fragment;
+    capability_strings[0].bv_len = len;
+
+    memcpy(fragment, CAPABILITY_PREFIX, CAPABILITY_PREFIX_LEN);
+    fragment += CAPABILITY_PREFIX_LEN;
+
+    for (conf = driver->config->capability.common; *conf; conf++) {
+        *fragment = ' ';
+        fragment++;
+        memcpy(fragment, *conf, strlen(*conf));
+        fragment += strlen(*conf);
+    }
+
+    /* capabilities sent over plaintext connection, imap->capability->plain and
+     * "STARTTLS" if TLS is set up */
+    len = 0;
+    if (driver->ssl_ctx)
+        len += 1 + STARTTLS_CAPABILITY_LEN;
+
+    for (conf = driver->config->capability.plain; *conf; conf++)
+        len += 1 + strlen(*conf);
+
+    fragment = malloc(len);
+    if (fragment == NULL)
+        return IMAP_HANDLER_ERROR;
+
+    capability_strings[1].bv_val = fragment;
+    capability_strings[1].bv_len = len;
+
+    if (driver->ssl_ctx) {
+        *fragment = ' ';
+        fragment++;
+        memcpy(fragment, STARTTLS_CAPABILITY, STARTTLS_CAPABILITY_LEN);
+        fragment += STARTTLS_CAPABILITY_LEN;
+    }
+
+    for (conf = driver->config->capability.plain; *conf; conf++) {
+        *fragment = ' ';
+        fragment++;
+        memcpy(fragment, *conf, strlen(*conf));
+        fragment += strlen(*conf);
+    }
+
+    /* capabilities sent over a TLS protected connection, imap->capability->tls */
+    len = 0;
+    for (conf = driver->config->capability.tls; *conf; conf++)
+        len += 1 + strlen(*conf);
+
+    fragment = malloc(len);
+    if (fragment == NULL)
+        return IMAP_HANDLER_ERROR;
+
+    capability_strings[2].bv_val = fragment;
+    capability_strings[2].bv_len = len;
+
+    for (conf = driver->config->capability.tls; *conf; conf++) {
+        *fragment = ' ';
+        fragment++;
+        memcpy(fragment, *conf, strlen(*conf));
+        fragment += strlen(*conf);
+    }
+
+    handler->priv = capability_strings;
+
+    return IMAP_HANDLER_OK;
+}
+
 static void
 trigger_listener(int flags, void *ctx)
 {
@@ -234,7 +399,7 @@ listen_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *
         return;
     }
 
-    bufferevent_write(bev, "* CAPABILITY IMAP4rev1 STARTTLS" CRLF, 33);
+    bufferevent_write(bev, SERVER_GREETING, SERVER_GREETING_LEN);
     skeeter_log(LOG_INFO, "A new connection established");
     imap_driver_install(bev, driver);
 }
@@ -483,13 +648,21 @@ imap_capability(struct imap_context *ctx, struct imap_request *req, void *priv)
 {
     struct bufferevent *bev = ctx->client_bev;
     struct evbuffer *output = bufferevent_get_output(bev);
+    BerValue *caps = priv;
 
     if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
         evbuffer_add_printf(output, "%s " BAD_ARG_NO CRLF, req->tag.bv_val);
         return IMAP_OK;
     }
 
-    evbuffer_add_printf(output, "* CAPABILITY IMAP4rev1 STARTTLS AUTH=PLAIN LOGINDISABLED" CRLF);
+    bufferevent_write(bev, caps[0].bv_val, caps[0].bv_len);
+    if (ctx->state & IMAP_TLS) {
+        bufferevent_write(bev, caps[2].bv_val, caps[2].bv_len);
+    } else {
+        bufferevent_write(bev, caps[1].bv_val, caps[1].bv_len);
+    }
+    bufferevent_write(bev, CRLF, 2);
+
     evbuffer_add_printf(output, "%s OK CAPABILITY completed" CRLF, req->tag.bv_val);
 
     return IMAP_OK;

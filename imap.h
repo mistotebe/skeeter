@@ -16,6 +16,10 @@
 #define IMAP_DONE 3
 #define IMAP_SHUTDOWN 4
 
+#define IMAP_HANDLER_OK 0
+#define IMAP_HANDLER_SKIP 1
+#define IMAP_HANDLER_ERROR -1
+
 #define STRLENOF(x) (sizeof(x) - 1)
 
 #define CRLF "\r\n"
@@ -33,13 +37,22 @@
 #define AUTH_ABORTED_MSG "BAD Authentication aborted"
 #define AUTH_ABORTED_MSG_LEN STRLENOF(AUTH_ABORTED_MSG)
 
+#define CAPABILITY_PREFIX "* CAPABILITY"
+#define CAPABILITY_PREFIX_LEN STRLENOF(CAPABILITY_PREFIX)
+#define STARTTLS_CAPABILITY "STARTTLS"
+#define STARTTLS_CAPABILITY_LEN STRLENOF(STARTTLS_CAPABILITY)
+#define SERVER_GREETING "* IMAP4rev1 service ready" CRLF
+#define SERVER_GREETING_LEN STRLENOF(SERVER_GREETING)
+
 struct imap_driver;
 struct imap_config;
 struct imap_context;
+struct imap_handler;
 struct imap_request;
 
 extern struct module imap_module;
 
+typedef int (*imap_handler_init)(struct imap_driver *, struct imap_handler *);
 typedef int (*imap_request_handler)(struct imap_context *, struct imap_request *, void *);
 
 typedef enum {
@@ -73,6 +86,9 @@ struct imap_config {
     char *default_host;
     int default_port;
     char *cert, *pkey;
+    struct capability {
+        char **common, **plain, **tls;
+    } capability;
 };
 
 struct imap_driver {
@@ -99,6 +115,7 @@ struct imap_context {
 struct imap_handler {
     char *command;
     imap_request_handler handler;
+    imap_handler_init init;
     void *priv;
 };
 
