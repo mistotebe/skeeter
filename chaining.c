@@ -76,7 +76,7 @@ chain_activate(struct chain *chain, struct bufferevent *bev, short iotype)
 
     /* we'd be stuck indefinitely until there was a new event on bev, so run
      * now */
-    bufferevent_trigger(bev, iotype, BEV_OPT_DEFER_CALLBACKS);
+    bufferevent_trigger(bev, iotype, BEV_TRIG_DEFER_CALLBACKS);
 
     return CHAIN_DONE;
 }
