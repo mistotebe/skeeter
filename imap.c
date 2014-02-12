@@ -38,6 +38,7 @@ static void search_cb(LDAP *, LDAPMessage *, void *);
 
 static void proxy_cb(struct bufferevent *, void *);
 static void server_connect_cb(struct bufferevent *, short, void *);
+static void server_error_cb(struct bufferevent *, short, void *);
 
 static struct imap_handler handlers[] = {
     { "STARTTLS", imap_starttls, imap_handler_tls_init },
@@ -54,6 +55,9 @@ static struct imap_handler handlers[] = {
 static char *capability_common_default[] = { "IMAP4rev1", NULL };
 static char *capability_plain_default[] = { "LOGINDISABLED", NULL };
 static char *capability_tls_default[] = { NULL };
+
+bv_const(newline, CRLF);
+bv_const(login, " LOGIN");
 
 static struct imap_config config_default = {
     .listen = "127.0.0.1:1143",
@@ -755,7 +759,6 @@ imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void
     struct imap_context *ctx = priv;
     struct imap_request *req = ctx->priv;
     struct imap_arg *args = req->priv;
-    struct evbuffer *out;
 
     /* A libevent passed event, forward to the original handler */
     if (flags && !(flags & CHAIN_MASK)) {
@@ -764,10 +767,12 @@ imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void
         return flags;
     }
 
-    bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
-
-    if (flags == CHAIN_DONE)
+    if (flags == CHAIN_DONE) {
+        bufferevent_disable(bev, EV_READ);
         return flags;
+    }
+
+    bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
 
     /*FIXME If there's a true error on our side (like LDAP), need to cause a
      * shutdown instead */
@@ -951,18 +956,43 @@ drain:;
 }
 
 static int
-imap_await_greeting(struct chain *chain, struct bufferevent *bev, void *ctx)
+imap_put_berval(struct chain *chain, struct bufferevent *bev, void *ctx)
 {
-    /* TODO */
-    return CHAIN_ERROR;
+    BerValue *string = ctx;
+
+    bufferevent_write(bev, string->bv_val, string->bv_len);
+    return CHAIN_DONE;
 }
 
 static int
-imap_put_login(struct chain *chain, struct bufferevent *bev, void *ctx)
+imap_put_literal_header(struct chain *chain, struct bufferevent *bev, void *ctx)
 {
-    BerValue *tag = ctx;
-    bufferevent_write(bev, tag->bv_val, tag->bv_len);
-    bufferevent_write(bev, " LOGIN", 6);
+    struct imap_arg *arg = ctx;
+    struct evbuffer *output = bufferevent_get_output(bev);
+
+    assert(ARG_TYPE(arg->arg_type) == ARG_LITERAL);
+    evbuffer_add_printf(output, " {%zu}" CRLF, arg->arg_len);
+    return CHAIN_DONE;
+}
+
+static int
+imap_await_greeting(struct chain *chain, struct bufferevent *bev, void *ctx)
+{
+    struct evbuffer_ptr pos;
+    struct evbuffer *input = bufferevent_get_input(bev);
+    unsigned char *p;
+
+    pos = evbuffer_search_eol(input, NULL, NULL, EVBUFFER_EOL_CRLF);
+    if (pos.pos == -1)
+        return CHAIN_AGAIN;
+
+    p = evbuffer_pullup(input, 5);
+    if (!p || memcmp(p, "* OK ", 5) != 0)
+        return CHAIN_ERROR;
+
+    pos = evbuffer_search_range(input, "IMAP4rev1", 9, NULL, &pos);
+    if (pos.pos == -1)
+        return CHAIN_ERROR;
 
     return CHAIN_DONE;
 }
@@ -973,7 +1003,6 @@ imap_await_goahead(struct chain *chain, struct bufferevent *bev, void *ctx)
     struct evbuffer *input = bufferevent_get_input(bev);
     const unsigned char *p;
 
-    debug(LOG_DEBUG, "imap_await_goahead");
     p = evbuffer_pullup(input, 3);
     if (!p) {
         return CHAIN_AGAIN;
@@ -989,17 +1018,6 @@ imap_await_goahead(struct chain *chain, struct bufferevent *bev, void *ctx)
 }
 
 static int
-imap_put_literal_header(struct chain *chain, struct bufferevent *bev, void *ctx)
-{
-    struct imap_arg *arg = ctx;
-    struct evbuffer *output = bufferevent_get_output(bev);
-
-    assert(ARG_TYPE(arg->arg_type) == ARG_LITERAL);
-    evbuffer_add_printf(output, " {%zu}" CRLF, arg->arg_len);
-    return CHAIN_DONE;
-}
-
-static int
 imap_put_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
 {
     struct imap_arg *arg = ctx;
@@ -1009,13 +1027,6 @@ imap_put_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
 
     /* this is destructive, but we have used what we needed */
     return bufferevent_write_buffer(bev, arg->buffer);
-}
-
-static int
-imap_put_crlf(struct chain *chain, struct bufferevent *bev, void *ctx)
-{
-    bufferevent_write(bev, CRLF, 2);
-    return CHAIN_DONE;
 }
 
 static int
@@ -1100,13 +1111,17 @@ imap_server_cleanup(struct chain *chain, struct bufferevent *bev, int flags, voi
     /* A libevent passed event, forward to the original handler */
     if ((short)flags) {
         /*FIXME needs a rethought */
-        conn_eventcb(bev, flags, priv);
+        server_error_cb(bev, flags, priv);
         return flags;
     }
 
     if (flags == CHAIN_DONE) {
         /* proxy_cb will copy the contents of the buffer to the client */
-        bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
+        bufferevent_setcb(bev, proxy_cb, NULL, server_connect_cb, ctx);
+        bufferevent_enable(bev, EV_READ);
+
+        bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, server_connect_cb, ctx);
+        bufferevent_enable(ctx->client_bev, EV_READ);
 
         return flags;
     }
@@ -1254,13 +1269,16 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
          * with chaining as it is designed, but needs a side channel to
          * communicate a "NO" properly.
          *
-         * chain_add(chain, imap_put_starttls, NULL, NULL);
+         * chain_add(chain, imap_put_berval, NULL, tag);
+         * chain_add(chain, imap_put_berval, NULL, &starttls);
          * chain_add(chain, imap_await_tag, NULL, tag);
          * chain_add(chain, imap_await_result, handle_no, &tls_approved_by_server);
          * chain_add(chain, imap_tls_layer, imap_tls_done, &tls_approved_by_server);
          */
-        chain_add(chain, imap_put_login, NULL, &req->tag);
+        chain_add(chain, imap_put_berval, NULL, &req->tag);
+        chain_add(chain, imap_put_berval, NULL, &login);
 
+        /* username */
         if (ARG_TYPE(args->arg_type) == ARG_LITERAL) {
             chain_add(chain, imap_put_literal_header, NULL, args);
             chain_add(chain, imap_await_goahead, NULL, NULL);
@@ -1268,13 +1286,14 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
         chain_add(chain, imap_put_astring, NULL, args);
 
         args++;
+        /* password */
         if (ARG_TYPE(args->arg_type) == ARG_LITERAL) {
             chain_add(chain, imap_put_literal_header, NULL, args);
             chain_add(chain, imap_await_goahead, NULL, NULL);
         }
         chain_add(chain, imap_put_astring, NULL, args);
 
-        chain_add(chain, imap_put_crlf, NULL, NULL);
+        chain_add(chain, imap_put_berval, NULL, &newline);
 
         chain_add(chain, imap_await_tag, NULL, &req->tag);
         chain_add(chain, imap_await_result, NULL, NULL);
@@ -1308,7 +1327,6 @@ server_error_cb(struct bufferevent *bev, short events, void *priv)
     free(ctx);
 }
 
-
 static void
 proxy_cb(struct bufferevent *source, void *priv)
 {
@@ -1323,4 +1341,7 @@ proxy_cb(struct bufferevent *source, void *priv)
             (source == ctx->client_bev) ? "client" : "server");
     debug(LOG_DEBUG, "%.*s", evbuffer_get_length(input), evbuffer_pullup(input, -1));
     bufferevent_write_buffer(target, input);
+    /* TODO: choke the reading bufferevent if we start buffering too much on
+     * the target and set a write watermark+callback to have it reopened when
+     * enough has been drained */
 }

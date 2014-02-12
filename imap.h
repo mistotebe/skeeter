@@ -21,6 +21,10 @@
 #define IMAP_HANDLER_ERROR -1
 
 #define STRLENOF(x) (sizeof(x) - 1)
+#define bv_const(name, string) struct berval name = { \
+    .bv_val = string, \
+    .bv_len = STRLENOF(string), \
+}
 
 #define CRLF "\r\n"
 
@@ -41,7 +45,7 @@
 #define CAPABILITY_PREFIX_LEN STRLENOF(CAPABILITY_PREFIX)
 #define STARTTLS_CAPABILITY "STARTTLS"
 #define STARTTLS_CAPABILITY_LEN STRLENOF(STARTTLS_CAPABILITY)
-#define SERVER_GREETING "* IMAP4rev1 service ready" CRLF
+#define SERVER_GREETING "* OK IMAP4rev1 service ready" CRLF
 #define SERVER_GREETING_LEN STRLENOF(SERVER_GREETING)
 
 struct imap_driver;
