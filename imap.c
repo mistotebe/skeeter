@@ -781,12 +781,12 @@ imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void
         return flags;
     }
 
+    bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
+
     if (flags == CHAIN_DONE) {
         bufferevent_disable(bev, EV_READ);
         return flags;
     }
-
-    bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
 
     /*FIXME If there's a true error on our side (like LDAP), need to cause a
      * shutdown instead */
