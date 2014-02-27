@@ -105,8 +105,10 @@ imap_driver_config(struct module *module, config_setting_t *conf)
         /* in the future there are going to be more listen addresses but not
          * right now */
         value = config_setting_get_elem(setting, 0);
-        if (value == NULL)
+        if (value == NULL) {
+            skeeter_log(LOG_CRIT, "Invalid listen address");
             return 1;
+        }
 
         conf_get_string(config->listen, value);
     }
@@ -116,19 +118,24 @@ imap_driver_config(struct module *module, config_setting_t *conf)
     if (setting) {
 
         value = config_setting_get_elem(setting, 0);
-        if (value == NULL)
+        if (value == NULL) {
+            skeeter_log(LOG_CRIT, "Default remote host address missing");
             return 1;
+        }
 
         conf_get_string(config->default_host, value);
 
         value = config_setting_get_elem(setting, 1);
-        if (value == NULL)
+        if (value == NULL) {
+            skeeter_log(LOG_CRIT, "Default remote port missing");
             return 1;
+        }
 
         port = config_setting_get_int(value);
         if ((port > 0) && (port <= 65535)) {
             config->default_port = port;
         } else {
+            skeeter_log(LOG_CRIT, "Invalid remote port");
             return 1;
         }
     }
@@ -136,14 +143,18 @@ imap_driver_config(struct module *module, config_setting_t *conf)
     setting = config_setting_get_member(conf, "tls");
     if (setting != NULL) {
         value = config_setting_get_elem(setting, 0);
-        if (value == NULL)
+        if (value == NULL) {
+            skeeter_log(LOG_CRIT, "SSL server cert missing");
             return 1;
+        }
 
         conf_get_string(config->cert, value);
 
         value = config_setting_get_elem(setting, 1);
-        if (value == NULL)
+        if (value == NULL) {
+            skeeter_log(LOG_CRIT, "SSL server key missing");
             return 1;
+        }
 
         conf_get_string(config->pkey, value);
     }
@@ -154,8 +165,10 @@ imap_driver_config(struct module *module, config_setting_t *conf)
 
         value = config_setting_get_member(setting, "common");
         if (value) {
-            if (!config_setting_is_aggregate(value))
+            if (!config_setting_is_aggregate(value)) {
+                skeeter_log(LOG_CRIT, "Invalid capability configuration in section common");
                 return 1;
+            }
 
             len = config_setting_length(value);
             config->capability.common = calloc(len + 1, sizeof(char *));
@@ -170,8 +183,10 @@ imap_driver_config(struct module *module, config_setting_t *conf)
 
         value = config_setting_get_member(setting, "plain");
         if (value) {
-            if (!config_setting_is_aggregate(value))
+            if (!config_setting_is_aggregate(value)) {
+                skeeter_log(LOG_CRIT, "Invalid capability configuration in section plain");
                 return 1;
+            }
 
             len = config_setting_length(value);
             config->capability.plain = calloc(len + 1, sizeof(char *));
@@ -186,8 +201,10 @@ imap_driver_config(struct module *module, config_setting_t *conf)
 
         value = config_setting_get_member(setting, "tls");
         if (value) {
-            if (!config_setting_is_aggregate(value))
+            if (!config_setting_is_aggregate(value)) {
+                skeeter_log(LOG_CRIT, "Invalid capability configuration in section tls");
                 return 1;
+            }
 
             len = config_setting_length(value);
             config->capability.tls = calloc(len + 1, sizeof(char *));
