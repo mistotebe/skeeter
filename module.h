@@ -11,9 +11,6 @@ typedef int (*init_cb)(struct module *, struct event_base *);
 typedef void (*shutdown_cb)(struct module *);
 typedef void (*destroy_cb)(struct module *);
 
-typedef void (*module_event_cb)(int, void *);
-typedef int (*register_module_event)(struct module *, int, module_event_cb, void *);
-
 typedef enum {
     MODULE_READY = 0x1,
     MODULE_UNAVAILABLE = 0x2,
@@ -22,6 +19,9 @@ typedef enum {
     MODULE_PERSIST = 0x8000,
     MODULE_SPECIFIC = 0xffff0000
 } module_event_flags;
+
+typedef void (*module_event_cb)(module_event_flags, void *);
+typedef int (*register_module_event)(struct module *, module_event_flags, module_event_cb, void *);
 
 struct module {
     char *name;

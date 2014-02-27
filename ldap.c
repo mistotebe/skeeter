@@ -115,7 +115,7 @@ void ldap_read_cb(struct bufferevent *, void *);
 void ldap_bind_cb(struct bufferevent *, void *);
 void ldap_connect_cb(struct bufferevent *, short, void *);
 void ldap_driver_connect_cb(evutil_socket_t, short, void *);
-int ldap_register_event(struct module *, int, module_event_cb, void *);
+int ldap_register_event(struct module *, module_event_flags, module_event_cb, void *);
 void ldap_call_handlers(struct ldap_driver *, int);
 void ldap_shutdown(struct module *);
 
@@ -465,7 +465,7 @@ ldap_driver_connect_cb(evutil_socket_t fd, short what, void *ctx)
 }
 
 int
-ldap_register_event(struct module *module, int flag, module_event_cb cb, void *ctx)
+ldap_register_event(struct module *module, module_event_flags flag, module_event_cb cb, void *ctx)
 {
     struct ldap_q_entry *entry;
     struct ldap_driver *driver = module->priv;

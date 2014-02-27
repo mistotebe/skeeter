@@ -23,7 +23,7 @@ static void request_free(struct imap_request *);
 static int imap_sp(struct chain *, struct bufferevent *, void *);
 static int imap_astring(struct chain *, struct bufferevent *, void *);
 
-static void trigger_listener(int, void *);
+static void trigger_listener(module_event_flags, void *);
 static void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
 static void conn_readcb(struct bufferevent *, void *);
 static void conn_eventcb(struct bufferevent *, short, void *);
@@ -397,7 +397,7 @@ imap_handler_capability_init(struct imap_driver *driver, struct imap_handler *ha
 }
 
 static void
-trigger_listener(int flags, void *ctx)
+trigger_listener(module_event_flags flags, void *ctx)
 {
     struct evconnlistener *listener = ctx;
     if (flags & MODULE_READY)
