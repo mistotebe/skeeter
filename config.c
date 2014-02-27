@@ -85,12 +85,18 @@ process_config_file(struct config *config)
 
     for (p = modules; *p; p++) {
         struct module *module = *p;
+        config_setting_t *module_conf;
+
+        module_conf = config_setting_get_member(root, module->name);
+        if (!module_conf)
+            continue;
+
         rc = register_module(module);
         if (rc)
             break;
 
         if (module->conf) {
-            rc = module->conf(module, config_setting_get_member(root, module->name));
+            rc = module->conf(module, module_conf);
             if (rc)
                 break;
         }

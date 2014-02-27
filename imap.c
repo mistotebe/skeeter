@@ -92,9 +92,6 @@ imap_driver_config(struct module *module, config_setting_t *conf)
     struct imap_driver *driver;
     int port;
 
-    if (conf == NULL)
-        return 1;
-
     config = malloc(sizeof(struct imap_config));
     if (config == NULL)
         return 1;

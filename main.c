@@ -36,16 +36,8 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    for (p = modules; *p; p++) {
-        struct module *module = *p;
-        if (!module->init)
-            continue;
-
-        if (module->init(module, base)) {
-            skeeter_log(LOG_CRIT, "Could not initialize module '%s'", module->name);
-            return 1;
-        }
-    }
+    if (initialize_modules(base))
+        return 1;
 
     signal_event = event_new(base, SIGINT, EV_SIGNAL, signal_cb, base);
 
