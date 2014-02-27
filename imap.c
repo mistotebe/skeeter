@@ -992,21 +992,24 @@ imap_put_literal_header(struct chain *chain, struct bufferevent *bev, void *ctx)
 static int
 imap_await_greeting(struct chain *chain, struct bufferevent *bev, void *ctx)
 {
-    struct evbuffer_ptr pos;
+    struct evbuffer_ptr eol, pos;
     struct evbuffer *input = bufferevent_get_input(bev);
     unsigned char *p;
+    size_t eol_size;
 
-    pos = evbuffer_search_eol(input, NULL, NULL, EVBUFFER_EOL_CRLF);
-    if (pos.pos == -1)
+    eol = evbuffer_search_eol(input, NULL, &eol_size, EVBUFFER_EOL_CRLF);
+    if (eol.pos == -1)
         return CHAIN_AGAIN;
 
     p = evbuffer_pullup(input, 5);
     if (!p || memcmp(p, "* OK ", 5) != 0)
         return CHAIN_ERROR;
 
-    pos = evbuffer_search_range(input, "IMAP4rev1", 9, NULL, &pos);
+    pos = evbuffer_search_range(input, "IMAP4rev1", 9, NULL, &eol);
     if (pos.pos == -1)
         return CHAIN_ERROR;
+
+    evbuffer_drain(input, eol.pos + eol_size);
 
     return CHAIN_DONE;
 }
@@ -1040,7 +1043,10 @@ imap_put_astring(struct chain *chain, struct bufferevent *bev, void *ctx)
         bufferevent_write(bev, " ", 1);
 
     /* this is destructive, but we have used what we needed */
-    return bufferevent_write_buffer(bev, arg->buffer);
+    if (bufferevent_write_buffer(bev, arg->buffer))
+        return CHAIN_ERROR;
+
+    return CHAIN_DONE;
 }
 
 static int
@@ -1116,28 +1122,31 @@ imap_await_result(struct chain *chain, struct bufferevent *bev, void *ctx)
 static int
 imap_server_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void *priv)
 {
-    struct imap_context *ctx = priv;
-    struct imap_request *req = ctx->priv;
-    struct imap_arg *args = req->priv;
+    struct imap_context *ctx;
+    struct imap_request *req;
+    struct imap_arg *args;
 
-    /* Hello, this code is not supposed to work at all, please tell me if you
-     * read this (at least it does not prevent compilation now :)) */
-    /* A libevent passed event, forward to the original handler */
-    if ((short)flags) {
-        /*FIXME needs a rethought */
-        server_error_cb(bev, flags, priv);
+    /* This is the second call, cleanup. But all cleanup has already happened
+     * when we were first called */
+    if (flags == CHAIN_ABORT)
         return flags;
-    }
+
+    ctx = (struct imap_context *)priv;
+    req = (struct imap_request *)ctx->priv;
+    args = (struct imap_arg *)req->priv;
 
     if (flags == CHAIN_DONE) {
-        /* proxy_cb will copy the contents of the buffer to the client */
-        bufferevent_setcb(bev, proxy_cb, NULL, server_connect_cb, ctx);
-        bufferevent_enable(bev, EV_READ);
+        /* We have stripped the tag from the server response, add the
+         * proper one and then send the rest of the response */
+        /*TODO send our own response so that we don't leak information */
+        bufferevent_write(ctx->client_bev, req->tag.bv_val, req->tag.bv_len);
+        bufferevent_write(ctx->client_bev, " ", 1);
+        proxy_cb(bev, ctx);
 
-        bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, server_connect_cb, ctx);
+        bufferevent_setcb(bev, proxy_cb, NULL, server_error_cb, ctx);
+
+        bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, server_error_cb, ctx);
         bufferevent_enable(ctx->client_bev, EV_READ);
-
-        return flags;
     }
 
     if (args[0].buffer) evbuffer_free(args[0].buffer);
@@ -1145,6 +1154,11 @@ imap_server_cleanup(struct chain *chain, struct bufferevent *bev, int flags, voi
     free(args);
 
     request_free(req);
+
+    /* We have an error, but non-fatal ones are handled by the chain_elem
+     * specific handler, which means that the connection is shutting down */
+    if (flags != CHAIN_DONE)
+        server_error_cb(bev, (short)flags, priv);
 
     return flags;
 }
