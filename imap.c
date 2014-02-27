@@ -1287,7 +1287,7 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
         struct imap_arg *args = req->priv;
         struct chain *chain = NULL;
 
-        skeeter_log(LOG_NOTICE, "Looks like we are connected, initiating server hanshake...");
+        skeeter_log(LOG_NOTICE, "Looks like we are connected, initiating server handshake...");
         chain = chain_new(imap_server_cleanup, ctx);
         if (!chain)
             goto cleanup;
