@@ -447,6 +447,9 @@ conn_eventcb_with_req(struct bufferevent *bev, short events, void *user_data)
 static void
 conn_eventcb(struct bufferevent *bev, short events, void *user_data)
 {
+    struct imap_context *ctx = user_data;
+    assert(bev == ctx->client_bev);
+
     if (events & BEV_EVENT_EOF) {
         skeeter_log(LOG_INFO, "Connection closed.");
     } else if (events & BEV_EVENT_ERROR) {
@@ -464,7 +467,10 @@ conn_eventcb(struct bufferevent *bev, short events, void *user_data)
 
     skeeter_log(LOG_NOTICE, "Closing client connection");
     bufferevent_free(bev);
-    free(user_data);
+    ctx->client_bev = NULL;
+
+    if (!ctx->server_bev)
+        free(ctx);
 }
 
 static void
@@ -1401,8 +1407,23 @@ server_event_cb(struct bufferevent *bev, short events, void *priv)
 cleanup:
     skeeter_log(LOG_INFO, "Closing server connection");
     bufferevent_free(ctx->server_bev);
-    bufferevent_free(ctx->client_bev);
-    free(ctx);
+    ctx->server_bev = NULL;
+
+    if (ctx->client_bev) {
+        struct imap_request *req = ctx->priv;
+        struct imap_arg *args = req->priv;
+
+        bufferevent_write(ctx->client_bev, req->tag.bv_val, req->tag.bv_len);
+        bufferevent_write(ctx->client_bev, " " AUTH_FAILED_MSG CRLF, 1 + AUTH_FAILED_MSG_LEN + 2);
+
+        if (args[0].buffer) evbuffer_free(args[0].buffer);
+        if (args[1].buffer) evbuffer_free(args[1].buffer);
+        free(args);
+
+        imap_resume(ctx->client_bev, ctx, req);
+    } else {
+        free(ctx);
+    }
 }
 
 static void
