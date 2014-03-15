@@ -451,7 +451,7 @@ static void
 conn_readcb(struct bufferevent *bev, void *user_data)
 {
     struct evbuffer *input = bufferevent_get_input(bev);
-    struct imap_context *driver_ctx = user_data;
+    struct imap_context *ctx = user_data;
     int rc = IMAP_OK;
 
     skeeter_log(LOG_INFO, "Ready to read");
@@ -472,7 +472,7 @@ conn_readcb(struct bufferevent *bev, void *user_data)
             goto cleanup;
         }
 
-        rc = imap_handle_request(driver_ctx, req);
+        rc = imap_handle_request(ctx, req);
         skeeter_log(LOG_INFO, "Request handled, result=%d", rc);
 
         if (rc == IMAP_DONE)
