@@ -52,12 +52,14 @@ parse_options(int argc, char **argv, struct config *config)
                 break;
             default:
                 /* garbage in, bail */
+                skeeter_log(LOG_CRIT, "Unknown option -%c", opt);
                 return 1;
         }
     }
 
     if (optind < argc) {
         /* there is something unexpected on the command line, bail too */
+        skeeter_log(LOG_CRIT, "Unexpected argument '%s'", argv[optind]);
         return 1;
     }
 

@@ -430,7 +430,8 @@ conn_eventcb(struct bufferevent *bev, short events, void *user_data)
     } else if (events & BEV_EVENT_ERROR) {
         skeeter_log(LOG_WARNING, "Got an error on the connection: %s",
                 strerror(errno));
-        skeeter_log(LOG_WARNING, "OpenSSL error is %lu", bufferevent_get_openssl_error(bev));
+        if (ctx->state & IMAP_TLS)
+            skeeter_log(LOG_WARNING, "OpenSSL error is %lu", bufferevent_get_openssl_error(bev));
     } else if (events & BEV_EVENT_TIMEOUT) {
         skeeter_log(LOG_NOTICE, "Got a timeout on %s, closing connection.", (events & BEV_EVENT_READING) ? "reading" : "writing");
     } else if (events & BEV_EVENT_CONNECTED) {
@@ -438,7 +439,8 @@ conn_eventcb(struct bufferevent *bev, short events, void *user_data)
         skeeter_log(LOG_DEBUG, "OpenSSL error %lu", bufferevent_get_openssl_error(bev));
         return;
     }
-    skeeter_log(LOG_NOTICE, "Freeing connection data");
+
+    skeeter_log(LOG_NOTICE, "Closing client connection");
     bufferevent_free(bev);
     free(user_data);
 }
@@ -1330,7 +1332,7 @@ server_connect_cb(struct bufferevent *bev, short events, void *priv)
         return;
     }
 cleanup:
-    skeeter_log(LOG_INFO, "Freeing connection data");
+    skeeter_log(LOG_INFO, "Closing server connection");
     bufferevent_free(ctx->server_bev);
     bufferevent_free(ctx->client_bev);
     free(ctx);
