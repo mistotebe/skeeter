@@ -729,9 +729,6 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
     struct bufferevent *bev = ctx->client_bev;
     struct evbuffer *output = bufferevent_get_output(bev);
     SSL *ssl_client_ctx = SSL_new(ctx->driver->ssl_ctx);
-    bufferevent_data_cb readcb, writecb;
-    bufferevent_event_cb eventcb;
-    void *orig_ctx;
 
     if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
         evbuffer_add_printf(output, "%s " BAD_ARG_NO CRLF, req->tag.bv_val);
@@ -742,9 +739,6 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
         evbuffer_add_printf(output, "%s BAD TLS layer already in place" CRLF, req->tag.bv_val);
         return IMAP_OK;
     }
-
-    /* retrieve the callbacks to apply them again on the filtering bev */
-    bufferevent_getcb(bev, &readcb, &writecb, &eventcb, &orig_ctx);
 
     evbuffer_add_printf(output, "%s OK Begin TLS negotiation now" CRLF, req->tag.bv_val);
 
@@ -757,8 +751,7 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
         return IMAP_SHUTDOWN;
     }
 
-    bufferevent_setcb(bev, readcb, writecb, eventcb, orig_ctx);
-    bufferevent_enable(bev, EV_READ|EV_WRITE);
+    imap_resume(bev, ctx, NULL);
     ctx->client_bev = bev;
     ctx->state |= IMAP_TLS;
 
@@ -1215,11 +1208,17 @@ imap_server_cleanup(struct chain *chain, struct bufferevent *bev, int flags, voi
         bufferevent_enable(ctx->client_bev, EV_READ);
     }
 
+    /* we need to do cleanup before server_event_cb is called as ctx could be
+     * freed if the client connection has failed in the meantime */
     if (args[0].buffer) evbuffer_free(args[0].buffer);
     if (args[1].buffer) evbuffer_free(args[1].buffer);
     free(args);
 
-    request_free(req);
+    if (flags == CHAIN_DONE) {
+        request_free(req);
+    } else {
+        imap_resume(ctx->client_bev, ctx, req);
+    }
 
     /* We have an error, but non-fatal ones are handled by the chain_elem
      * specific handler, which means that the connection is shutting down */
@@ -1304,9 +1303,19 @@ search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
 
     // user not provisioned
     if (!servername || !*servername) {
+        struct imap_arg *args = req->priv;
+
+        if (servername)
+            ldap_value_free_len(servername);
+
         bufferevent_write(ctx->client_bev, req->tag.bv_val, req->tag.bv_len);
         bufferevent_write(ctx->client_bev, " " AUTH_FAILED_MSG CRLF, 1 + AUTH_FAILED_MSG_LEN + 2);
-        bufferevent_enable(ctx->client_bev, EV_READ);
+
+        if (args[0].buffer) evbuffer_free(args[0].buffer);
+        if (args[1].buffer) evbuffer_free(args[1].buffer);
+        free(args);
+
+        imap_resume(ctx->client_bev, ctx, req);
         return;
     }
 
