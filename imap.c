@@ -39,8 +39,8 @@ static int imap_credential_check(struct chain *, struct bufferevent *, void *);
 static void search_cb(LDAP *, LDAPMessage *, void *);
 
 static void proxy_cb(struct bufferevent *, void *);
-static void server_connect_cb(struct bufferevent *, short, void *);
-static void server_error_cb(struct bufferevent *, short, void *);
+static void server_event_cb(struct bufferevent *, short, void *);
+static void proxy_error_cb(struct bufferevent *, short, void *);
 
 static struct imap_handler handlers[] = {
     { "STARTTLS", imap_starttls, imap_handler_tls_init },
@@ -1174,9 +1174,9 @@ imap_server_cleanup(struct chain *chain, struct bufferevent *bev, int flags, voi
         bufferevent_write(ctx->client_bev, " ", 1);
         proxy_cb(bev, ctx);
 
-        bufferevent_setcb(bev, proxy_cb, NULL, server_error_cb, ctx);
+        bufferevent_setcb(bev, proxy_cb, NULL, proxy_error_cb, ctx);
 
-        bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, server_error_cb, ctx);
+        bufferevent_setcb(ctx->client_bev, proxy_cb, NULL, proxy_error_cb, ctx);
         bufferevent_enable(ctx->client_bev, EV_READ);
     }
 
@@ -1189,7 +1189,7 @@ imap_server_cleanup(struct chain *chain, struct bufferevent *bev, int flags, voi
     /* We have an error, but non-fatal ones are handled by the chain_elem
      * specific handler, which means that the connection is shutting down */
     if (flags != CHAIN_DONE)
-        server_error_cb(bev, (short)flags, priv);
+        server_event_cb(bev, (short)flags, priv);
 
     return flags;
 }
@@ -1287,13 +1287,7 @@ search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
     server_bev = bufferevent_socket_new(ctx->driver->base, -1, BEV_OPT_CLOSE_ON_FREE);
     bufferevent_enable(server_bev, EV_READ|EV_WRITE);
     bufferevent_socket_connect_hostname(server_bev, ctx->driver->dnsbase, AF_UNSPEC, servername[0]->bv_val, port);
-    bufferevent_setcb(server_bev, NULL, NULL, server_connect_cb, ctx);
-
-    /*
-    // copy over client data, CRLF in request has been skipped, so append that
-    bufferevent_write(server_bev, req->line.bv_val, req->line.bv_len);
-    bufferevent_write(server_bev, CRLF, 2);
-    */
+    bufferevent_setcb(server_bev, NULL, NULL, server_event_cb, ctx);
 
     ctx->server_bev = server_bev;
 
@@ -1301,7 +1295,7 @@ search_cb(LDAP *ld, LDAPMessage *msg, void *priv)
 }
 
 static void
-server_connect_cb(struct bufferevent *bev, short events, void *priv)
+server_event_cb(struct bufferevent *bev, short events, void *priv)
 {
     struct imap_context *ctx = priv;
     assert(bev == ctx->server_bev);
@@ -1368,7 +1362,7 @@ cleanup:
 }
 
 static void
-server_error_cb(struct bufferevent *bev, short events, void *priv)
+proxy_error_cb(struct bufferevent *bev, short events, void *priv)
 {
     struct imap_context *ctx = priv;
 
