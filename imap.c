@@ -26,6 +26,7 @@ static int imap_astring(struct chain *, struct bufferevent *, void *);
 static void trigger_listener(module_event_flags, void *);
 static void listen_cb(struct evconnlistener *, evutil_socket_t, struct sockaddr *, int socklen, void *);
 static void conn_readcb(struct bufferevent *, void *);
+static void conn_eventcb_with_req(struct bufferevent *, short, void *);
 static void conn_eventcb(struct bufferevent *, short, void *);
 
 static int imap_capability(struct imap_context *ctx, struct imap_request *req, void *priv);
@@ -425,6 +426,25 @@ listen_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *
 }
 
 static void
+conn_eventcb_with_req(struct bufferevent *bev, short events, void *user_data)
+{
+    struct imap_context *ctx = user_data;
+    if (ctx->priv) {
+        struct imap_request *req = ctx->priv;
+
+        if (req->priv) {
+            struct imap_arg *args = req->priv;
+
+            if (args[0].buffer) evbuffer_free(args[0].buffer);
+            if (args[1].buffer) evbuffer_free(args[1].buffer);
+            free(args);
+        }
+        request_free(req);
+    }
+    conn_eventcb(bev, events, user_data);
+}
+
+static void
 conn_eventcb(struct bufferevent *bev, short events, void *user_data)
 {
     if (events & BEV_EVENT_EOF) {
@@ -815,7 +835,9 @@ imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void
     bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
 
     if (flags == CHAIN_DONE) {
-        bufferevent_disable(bev, EV_READ);
+        /* imap_credential_check disables the bufferevent for reading, so we're
+         * free to just set the eventcb */
+        bufferevent_setcb(bev, NULL, NULL, conn_eventcb_with_req, ctx);
         return flags;
     }
 
