@@ -587,6 +587,20 @@ request_free(struct imap_request *req)
     free(req);
 }
 
+void
+imap_resume(struct bufferevent *bev, struct imap_context *ctx, struct imap_request *req)
+{
+    struct timeval tval = { .tv_sec = 60, .tv_usec = 0 };
+
+    if (req)
+        request_free(req);
+    ctx->priv = NULL;
+
+    bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
+    bufferevent_enable(bev, EV_READ|EV_WRITE);
+    bufferevent_set_timeouts(bev, &tval, &tval);
+}
+
 static int
 unescape_arg(BerValue *out, struct evbuffer *in)
 {
@@ -648,19 +662,18 @@ drain_newline(struct bufferevent *bev, enum evbuffer_eol_style eol_style)
 static int
 imap_driver_install(struct bufferevent *bev, struct imap_driver *driver)
 {
-    struct imap_context *ctx;
-    struct timeval tval;
+    struct imap_context *ctx = calloc(1, sizeof(struct imap_context));
 
-    ctx = (struct imap_context *)calloc(1, sizeof(struct imap_context));
+    if (!ctx) {
+        bufferevent_free(bev);
+        skeeter_log(LOG_CRIT, "Could not allocate context!");
+        return IMAP_SHUTDOWN;
+    }
+
     ctx->driver = driver;
     ctx->client_bev = bev;
 
-    tval.tv_sec = 60;
-    tval.tv_usec = 0;
-
-    bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
-    bufferevent_enable(bev, EV_READ|EV_WRITE);
-    bufferevent_set_timeouts(bev, &tval, &tval);
+    imap_resume(bev, ctx, NULL);
     return IMAP_OK;
 }
 

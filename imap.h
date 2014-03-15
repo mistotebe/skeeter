@@ -148,4 +148,10 @@ int imap_driver_config(struct module *, config_setting_t *);
 int imap_driver_init(struct module *, struct event_base *);
 int imap_handle_request(struct imap_context *, struct imap_request *);
 
+/**
+ * Reestablishes the IMAP request handling on the bufferevent. If last argument
+ * is non-NULL, it will be freed.
+ */
+void imap_resume(struct bufferevent *, struct imap_context *, struct imap_request *);
+
 #endif /* _IMAP_H */
