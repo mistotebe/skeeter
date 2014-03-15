@@ -840,17 +840,13 @@ static int
 imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void *priv)
 {
     struct imap_context *ctx = priv;
-    struct imap_request *req = ctx->priv;
-    struct imap_arg *args = req->priv;
+    struct imap_request *req;
+    struct imap_arg *args;
 
-    /* A libevent passed event, forward to the original handler */
-    if (flags && !(flags & CHAIN_MASK)) {
-        /*FIXME needs a rethought */
-        conn_eventcb(bev, flags, priv);
+    /* This is the second call, cleanup. But all cleanup has already happened
+     * when we were first called */
+    if (flags == CHAIN_ABORT)
         return flags;
-    }
-
-    bufferevent_setcb(bev, conn_readcb, NULL, conn_eventcb, ctx);
 
     if (flags == CHAIN_DONE) {
         /* imap_credential_check disables the bufferevent for reading, so we're
@@ -859,8 +855,11 @@ imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void
         return flags;
     }
 
-    /*FIXME If there's a true error on our side (like LDAP), need to cause a
-     * shutdown instead */
+    req = (struct imap_request *)ctx->priv;
+    args = (struct imap_arg *)req->priv;
+
+    /*FIXME If there's a true error on our side (like LDAP), need to admit it
+     * and cause a shutdown instead */
     bufferevent_write(bev, req->tag.bv_val, req->tag.bv_len);
     bufferevent_write(bev, " " BAD_INVALID CRLF, 1 + BAD_INVALID_LEN + 2);
 
@@ -868,7 +867,14 @@ imap_login_cleanup(struct chain *chain, struct bufferevent *bev, int flags, void
     if (args[1].buffer) evbuffer_free(args[1].buffer);
     free(args);
 
-    request_free(req);
+    imap_resume(bev, ctx, req);
+
+    /* A libevent passed event, forward to the original handler */
+    if (flags && !(flags & CHAIN_MASK)) {
+        /*FIXME needs a rethought */
+        conn_eventcb(bev, flags, priv);
+        return flags;
+    }
 
     return flags;
 }
@@ -1251,13 +1257,11 @@ imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
     char *attrs[2] = { "mailhost", NULL };
     char *p;
     ssize_t len, len_domain = 0;
-    int rc = CHAIN_DONE;
+    int rc = CHAIN_ERROR;
     int freeit = 0;
 
-    if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
-        evbuffer_add_printf(output, "%s " BAD_ARG_NO CRLF, req->tag.bv_val);
+    if (drain_newline(bev, EVBUFFER_EOL_CRLF))
         return rc;
-    }
 
     if (ARG_TYPE(args->arg_type) == ARG_QUOTED) {
         unescape_arg(&user_info.username, args->buffer);
@@ -1286,11 +1290,11 @@ imap_credential_check(struct chain *chain, struct bufferevent *bev, void *priv)
     if (get_user_info(ctx->driver->ldap, &user_info, search_cb, ctx)) {
         /*FIXME */
         evbuffer_add_printf(output, "%s " SERVER_ERROR CRLF, req->tag.bv_val);
-        rc = IMAP_SHUTDOWN;
+    } else {
+        /* now stop reading on the connection until we're connected to server */
+        bufferevent_disable(bev, EV_READ);
+        rc = CHAIN_DONE;
     }
-
-    /* stop reading on the connection until we're connected to server */
-    bufferevent_disable(bev, EV_READ);
 
     if (freeit)
         free(user_info.username.bv_val);
