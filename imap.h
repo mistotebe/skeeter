@@ -57,6 +57,19 @@ struct imap_request;
 extern struct module imap_module;
 
 typedef int (*imap_handler_init)(struct imap_driver *, struct imap_handler *);
+/**
+ * Handles the request.
+ * Return codes:
+ * - IMAP_OK: processing can continue normally
+ * - IMAP_DONE: handler wants to take control over the bufferevent,
+ *              by doing so it needs to take care of freeing the imap_request
+ *              pointer (most likely needs to take over the bufferevent's
+ *              event_cb as well). To give control back to the request
+ *              handling, call imap_resume()
+ * - IMAP_SHUTDOWN: the connection should be closed
+ * - everything else is considered an error and closes the connection as if
+ *   IMAP_SHUTDOWN was returned
+ */
 typedef int (*imap_request_handler)(struct imap_context *, struct imap_request *, void *);
 
 typedef enum {
