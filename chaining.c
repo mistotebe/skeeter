@@ -4,6 +4,13 @@
 #include <assert.h>
 #include <event2/event.h>
 
+/*
+ * Implementation considerations (aka features not advertised to chain users):
+ * - do not cede control between an error being raised and before it will be
+ *   handled by current+chain-wide except callback. If we did, we risk being
+ *   called again with the chain being in a half torn-down state.
+ */
+
 struct chain_elem {
     chain_process process;
     chain_except event;
@@ -19,8 +26,10 @@ struct chain {
     void *ctx;
 };
 
+static void chain_run(struct bufferevent *, void *);
+
 static void chain_event(struct bufferevent *, short, void *);
-static void chain_event_int(struct bufferevent *, int, void *);
+static int chain_event_int(struct bufferevent *, int, void *);
 
 int
 chain_add(struct chain *chain, chain_process process, chain_except event, void *ctx)
@@ -81,7 +90,7 @@ chain_activate(struct chain *chain, struct bufferevent *bev, short iotype)
     return CHAIN_DONE;
 }
 
-void
+static void
 chain_run(struct bufferevent *bev, void *ctx)
 {
     struct chain *chain = ctx;
@@ -89,34 +98,37 @@ chain_run(struct bufferevent *bev, void *ctx)
     int rc = CHAIN_DONE;
 
     assert(chain);
+    while (rc == CHAIN_DONE) {
+        for (cur = chain->current;
+                rc == CHAIN_DONE && cur;
+                cur = STAILQ_NEXT(cur, next)) {
+            chain->current = cur;
+            if (cur->process)
+                rc = cur->process(chain, bev, cur->ctx);
+        };
 
-    for (cur = chain->current;
-            rc == CHAIN_DONE && cur;
-            cur = STAILQ_NEXT(cur, next)) {
-        chain->current = cur;
-        rc = cur->process(chain, bev, cur->ctx);
-    };
+        if (rc == CHAIN_AGAIN) {
+            /* We need more data */
+            return;
+        }
+        if (rc == CHAIN_DONE) {
+            chain_destroy(chain, bev, CHAIN_DONE);
+            return;
+        }
 
-    if (rc == CHAIN_AGAIN) {
-        /* We need more data */
-        return;
+        /* Error */
+        rc = chain_event_int(bev, rc, ctx);
+        /* If we recovered with CHAIN_DONE now, continue */
     }
-    if (rc == CHAIN_DONE) {
-        chain_destroy(chain, bev, CHAIN_DONE);
-        return;
-    }
-
-    /* Error */
-    chain_event_int(bev, rc, ctx);
 }
 
 static void
 chain_event(struct bufferevent *bev, short events, void *ctx)
 {
-    chain_event_int(bev, events, ctx);
+    (void)chain_event_int(bev, events, ctx);
 }
 
-static void
+static int
 chain_event_int(struct bufferevent *bev, int events, void *ctx)
 {
     struct chain *chain = ctx;
@@ -130,7 +142,7 @@ chain_event_int(struct bufferevent *bev, int events, void *ctx)
             if (rc == CHAIN_DONE)
                 chain->current = STAILQ_NEXT(chain->current, next);
             /* Recovered */
-            return;
+            return rc;
         }
     }
 
@@ -138,11 +150,12 @@ chain_event_int(struct bufferevent *bev, int events, void *ctx)
         rc = chain->event(chain, bev, events, chain->ctx);
         if (rc == CHAIN_AGAIN) {
             /* Recovered */
-            return;
+            return rc;
         }
     }
 
     chain_destroy(chain, bev, CHAIN_ABORT);
+    return CHAIN_ABORT;
 }
 
 void
