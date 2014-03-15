@@ -506,6 +506,12 @@ conn_readcb(struct bufferevent *bev, void *user_data)
 
 cleanup:
         request_free(req);
+        if (rc != IMAP_OK) {
+            skeeter_log(LOG_NOTICE, "Closing client connection");
+            bufferevent_free(bev);
+            free(ctx);
+            return;
+        }
     }
 }
 
