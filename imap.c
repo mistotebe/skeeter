@@ -31,6 +31,8 @@ static void conn_eventcb(struct bufferevent *, short, void *);
 static int imap_capability(struct imap_context *ctx, struct imap_request *req, void *priv);
 static int imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv);
 static int imap_login(struct imap_context *ctx, struct imap_request *req, void *priv);
+static int imap_noop(struct imap_context *ctx, struct imap_request *req, void *priv);
+static int imap_logout(struct imap_context *ctx, struct imap_request *req, void *priv);
 
 static int imap_login_cleanup(struct chain *, struct bufferevent *, int, void *);
 static int imap_credential_check(struct chain *, struct bufferevent *, void *);
@@ -44,9 +46,9 @@ static struct imap_handler handlers[] = {
     { "STARTTLS", imap_starttls, imap_handler_tls_init },
     { "CAPABILITY", imap_capability, imap_handler_capability_init },
     { "LOGIN", imap_login },
-    /*
     { "NOOP", imap_noop },
     { "LOGOUT", imap_logout },
+    /*
     { "AUTHENTICATE", imap_authenticate },
     */
     { NULL }
@@ -728,6 +730,33 @@ imap_starttls(struct imap_context *ctx, struct imap_request *req, void *priv)
     ctx->state |= IMAP_TLS;
 
     return IMAP_OK;
+}
+
+static int
+imap_noop(struct imap_context *ctx, struct imap_request *req, void *priv)
+{
+    struct bufferevent *bev = ctx->client_bev;
+    struct evbuffer *output = bufferevent_get_output(bev);
+
+    if (drain_newline(bev, EVBUFFER_EOL_CRLF)) {
+        evbuffer_add_printf(output, "%s " BAD_ARG_NO CRLF, req->tag.bv_val);
+        return IMAP_OK;
+    }
+
+    evbuffer_add_printf(output, "%s OK NOOP Completed" CRLF, req->tag.bv_val);
+
+    return IMAP_OK;
+}
+
+static int
+imap_logout(struct imap_context *ctx, struct imap_request *req, void *priv)
+{
+    struct bufferevent *bev = ctx->client_bev;
+    struct evbuffer *output = bufferevent_get_output(bev);
+
+    evbuffer_add_printf(output, "%s OK LOGOUT now" CRLF, req->tag.bv_val);
+
+    return IMAP_SHUTDOWN;
 }
 
 static int
