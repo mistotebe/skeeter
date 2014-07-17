@@ -25,6 +25,8 @@ d :=
 sp :=
 dir := avl
 include $(dir)/Rules.mk
+dir := test
+include $(dir)/Rules.mk
 
 all: $(PROGRAM)
 
