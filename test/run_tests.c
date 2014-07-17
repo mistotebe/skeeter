@@ -6,12 +6,14 @@
 typedef TCase * (*test_func)(void);
 
 test_func tests[] = {
+    &testcase_logging,
     &testcase_module,
     NULL
 };
 
 void setup(void)
 {
+    setup_logging();
 }
 
 void teardown(void)
