@@ -12,6 +12,8 @@
     memcpy((dst), (src)->bv_val, (src)->bv_len); \
     (dst) += (src)->bv_len;
 
+int ldap_pvt_put_filter( BerElement *, const char * );
+
 int
 filter_create(struct filter *filter, const char *pattern)
 {
@@ -30,7 +32,7 @@ filter_create(struct filter *filter, const char *pattern)
     ber = ber_alloc_t(0);
     if (!ber)
         return 1;
-    if (ldap_put_vrFilter(ber, pattern)) {
+    if (ldap_pvt_put_filter(ber, pattern)) {
         ber_free(ber, 1);
         return 1;
     }

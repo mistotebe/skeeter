@@ -7,5 +7,6 @@ void setup_logging(void);
 
 TCase *testcase_logging(void);
 TCase *testcase_module(void);
+TCase *testcase_filter(void);
 
 #endif /* TEST_H */

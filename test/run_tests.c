@@ -8,6 +8,7 @@ typedef TCase * (*test_func)(void);
 test_func tests[] = {
     &testcase_logging,
     &testcase_module,
+    &testcase_filter,
     NULL
 };
 
