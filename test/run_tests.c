@@ -6,6 +6,7 @@
 typedef TCase * (*test_func)(void);
 
 test_func tests[] = {
+    &testcase_module,
     NULL
 };
 

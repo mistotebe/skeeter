@@ -3,4 +3,6 @@
 
 #include <check.h>
 
+TCase *testcase_module(void);
+
 #endif /* TEST_H */
