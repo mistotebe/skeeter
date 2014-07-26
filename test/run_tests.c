@@ -9,6 +9,7 @@ test_func tests[] = {
     &testcase_logging,
     &testcase_module,
     &testcase_filter,
+    &testcase_ssl,
     NULL
 };
 
